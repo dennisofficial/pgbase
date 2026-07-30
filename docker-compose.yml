@@ -34,7 +34,7 @@ services:
       timeout: 3s
       retries: 30
     volumes:
-      - pgbase-pgdata:/var/lib/postgresql/data
+      - ./.docker/pg:/var/lib/postgresql/data
 
   # Separate database for the differential property suite (§4.1), which creates and drops tables
   # freely. Kept off the dev DB on purpose — a shared test DB has truncated a live dev database

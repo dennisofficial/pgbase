@@ -1184,6 +1184,14 @@ the DMMF. Newly known: the **implicit many-to-many join table** (`_BookToAuthor`
 DMMF variant at all — it is a schema-level concept Prisma hides — so its physical shape must also
 come from `pg_catalog`.
 
+> **Measured 2026-07-30 against the example app.** The join table is physically real
+> (`_JobToTag`) and, in Prisma 7, gets a genuine composite primary key (`_JobToTag_AB_pkey`), not
+> merely a unique index. Two consequences, both favourable: §7.5's reject-no-PK-tables check does
+> not trip on it, and it needs **no** `REPLICA IDENTITY FULL` — for a join table the PK *is* the
+> whole row, so default replica identity already delivers a complete old tuple on DELETE. The
+> outstanding work is therefore only *discovery* (its name and columns must come from
+> `pg_catalog`), not special-case replication handling.
+
 ### Incidental finding
 
 Prisma 7 rejects an inline `datasource { url = env(...) }` (`P1012`); the connection URL moved to

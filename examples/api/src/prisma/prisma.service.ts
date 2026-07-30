@@ -7,7 +7,16 @@ import { PrismaClient } from '../generated/prisma/client';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
-    super({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      // Fail here with something actionable. Passing `undefined` through to PrismaPg surfaces
+      // much later as an unrelated-looking connection error.
+      throw new Error(
+        'DATABASE_URL is not set. Copy examples/api/.env.example to examples/api/.env ' +
+          '(and run `pnpm example:up` to start Postgres).',
+      );
+    }
+    super({ adapter: new PrismaPg({ connectionString }) });
   }
 
   async onModuleInit() {
