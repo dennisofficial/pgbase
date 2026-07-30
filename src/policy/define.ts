@@ -1,16 +1,17 @@
 import type { LiveWhere } from '../query/ast.js';
 import type { Policy, PolicyEntry } from './types.js';
 
-export interface DefinePolicyInput<Row, View, Claims> {
-  readonly transform: (row: Row) => View;
+export interface DefinePolicyInput<Row, Claims, Omitted extends readonly (keyof Row)[]> {
+  readonly omit?: Omitted;
   readonly rls: (claims: Claims) => LiveWhere;
 }
 
-export function definePolicy<Row, View, Claims>(
-  model: string,
-  input: DefinePolicyInput<Row, View, Claims>,
-): Policy<Row, View, Claims> {
-  return { model, transform: input.transform, rls: input.rls };
+export function definePolicy<Row, Claims>(model: string) {
+  return function <const Omitted extends readonly (keyof Row)[] = readonly []>(
+    input: DefinePolicyInput<Row, Claims, Omitted>,
+  ): Policy<Row, Omitted[number], Claims> {
+    return { model, omit: (input.omit ?? []) as readonly Omitted[number][], rls: input.rls };
+  };
 }
 
 export type PolicyRegistry<ModelName extends string> = {

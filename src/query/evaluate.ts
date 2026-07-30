@@ -84,7 +84,7 @@ function evalCompare(node: Extract<PredicateNode, { kind: 'compare' }>, row: Row
     return evalTextOp(op, raw as string, value as string, insensitive);
   }
 
-  const comparator = getComparator(field.typeOid, field.elementTypeOid);
+  const comparator = getComparator(field.typeOid, field.elementTypeOid, field.enumValues);
   if (op === 'equals' || op === 'not') {
     const eq = insensitive
       ? asciiLower(raw as string) === asciiLower(value as string)
@@ -111,7 +111,11 @@ function evalSet(node: Extract<PredicateNode, { kind: 'set' }>, row: Row): Truth
   if (node.values.length === 0) return node.op === 'in' ? false : true;
   const raw = getRaw(row, node.field.column);
   if (raw === null) return null;
-  const comparator = getComparator(node.field.typeOid, node.field.elementTypeOid);
+  const comparator = getComparator(
+    node.field.typeOid,
+    node.field.elementTypeOid,
+    node.field.enumValues,
+  );
   const found = node.values.some((v) => comparator.equals(raw, v));
   return node.op === 'in' ? found : !found;
 }
@@ -123,7 +127,11 @@ function evalList(node: Extract<PredicateNode, { kind: 'list' }>, row: Row): Tru
     throw new Error(`evaluate(): column "${node.field.column}" is not an array.`);
   if (node.op === 'isEmpty') return raw.length === 0;
 
-  const elementComparator = getComparator(node.field.elementTypeOid as number, null);
+  const elementComparator = getComparator(
+    node.field.elementTypeOid as number,
+    null,
+    node.field.enumValues,
+  );
   const matches = (needle: unknown) =>
     raw.some((el) => el !== null && elementComparator.equals(el, needle));
   switch (node.op) {

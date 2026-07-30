@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { definePolicy } from '../../policy/define.js';
 import { resolveFixtureSchema } from '../../policy/__tests__/fixtures.js';
+import { definePolicy } from '../../policy/define.js';
 import { evaluate } from '../../query/evaluate.js';
 import { normalize } from '../../query/normalize.js';
 import { createTestPool } from '../../schema/test-support.js';
@@ -16,8 +16,7 @@ interface Claims {
 const ORG_1 = '11111111-1111-4111-8111-111111111111';
 const ORG_2 = '22222222-2222-4222-8222-222222222222';
 
-const jobPolicy = definePolicy<Record<string, unknown>, unknown, Claims>('Job', {
-  transform: (row) => row,
+const jobPolicy = definePolicy<Record<string, unknown>, Claims>('Job')({
   rls: (claims) => ({ orgId: claims.orgId }),
 });
 
@@ -72,15 +71,13 @@ describe('assertCreateInScope — FIELD-keyed row', () => {
 
 describe('assertUpdateStaysInScope — post-image check', () => {
   it('passes when the post-image is still in scope', () => {
-    expect(() =>
-      assertUpdateStaysInScope(jobPolicy, claims, job, { orgId: ORG_1 }),
-    ).not.toThrow();
+    expect(() => assertUpdateStaysInScope(jobPolicy, claims, job, { orgId: ORG_1 })).not.toThrow();
   });
 
   it('throws when the post-image moves the row to another org — an unauthorized delete-by-reassignment', () => {
-    expect(() =>
-      assertUpdateStaysInScope(jobPolicy, claims, job, { orgId: ORG_2 }),
-    ).toThrow(ScopeViolationError);
+    expect(() => assertUpdateStaysInScope(jobPolicy, claims, job, { orgId: ORG_2 })).toThrow(
+      ScopeViolationError,
+    );
   });
 
   it('the thrown error carries kind "update", distinct from "create"', () => {

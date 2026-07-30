@@ -1,5 +1,6 @@
 import { scopedWhere } from '../context/scoped-write.js';
 import { normalizeClientWhere } from '../policy/filterable.js';
+import { buildProjector } from '../policy/project.js';
 import type { ProbeResult } from '../policy/types.js';
 import type { ValidatedPolicy } from '../policy/validate.js';
 import type { LiveWhere } from '../query/ast.js';
@@ -84,8 +85,8 @@ function scopeLevel<Claims>(
   if (skip !== undefined) args.skip = skip;
   if (include) args.include = include;
 
-  const transform = withCount(policy.transform, hasCount);
-  const plan: ResultPlan = { model: model.model, transform, relations };
+  const project = withCount(buildProjector(model, policy), hasCount);
+  const plan: ResultPlan = { model: model.model, project, relations };
 
   return { args, plan };
 }
@@ -217,13 +218,12 @@ function validateScalarSelect(
         `Model "${model.model}" at "${label(path)}": unknown field "${key}" in "select".`,
       );
     }
-    const exposure = probeResult.exposure.get(key);
-    if (exposure === undefined || exposure === 'absent') {
+    if (!probeResult.filterable.has(key)) {
       throw new ReadValidationError(
         model.model,
         path,
-        `Model "${model.model}" at "${label(path)}": field "${key}" is not exposed by this ` +
-          `model's transform and cannot be selected.`,
+        `Model "${model.model}" at "${label(path)}": field "${key}" is omitted by this model's ` +
+          `policy and cannot be selected.`,
       );
     }
   }
@@ -450,16 +450,16 @@ function buildCount<Claims>(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _count is a plain number pulled from Prisma's row, not a policy-governed relation — merge it
-// back onto the transformed view rather than teaching ResultPlan a second kind of node.
+// back onto the projected view rather than teaching ResultPlan a second kind of node.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function withCount(
-  transform: (row: unknown) => unknown,
+  project: (row: unknown) => unknown,
   hasCount: boolean,
 ): (row: unknown) => unknown {
-  if (!hasCount) return transform;
+  if (!hasCount) return project;
   return (row: unknown) => {
-    const view = transform(row);
+    const view = project(row);
     if (view === null || typeof view !== 'object' || Array.isArray(view)) return view;
     const count = row && typeof row === 'object' ? (row as Record<string, unknown>)['_count'] : undefined;
     if (count === undefined) return view;

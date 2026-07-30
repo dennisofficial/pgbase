@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { SCHEMA_FORMAT_VERSION } from '../../version.js';
 import { PgCatalogSchemaProvider } from '../resolver.js';
 import { createTestPool } from '../test-support.js';
-import type { StaticModel, StaticSchema } from '../types.js';
+import type { SchemaEnum, StaticModel, StaticSchema } from '../types.js';
 
 // Well-known, stable Postgres built-in OIDs (pg_type is an initial catalog; these never change).
 const OID_TEXT = 25;
@@ -12,8 +12,8 @@ const OID_NUMERIC = 1700;
 const OID_INT8 = 20;
 const OID_UUID = 2950;
 
-function schema(models: readonly StaticModel[]): StaticSchema {
-  return { formatVersion: SCHEMA_FORMAT_VERSION, models, enums: [] };
+function schema(models: readonly StaticModel[], enums: readonly SchemaEnum[] = []): StaticSchema {
+  return { formatVersion: SCHEMA_FORMAT_VERSION, models, enums };
 }
 
 function model(partial: Partial<StaticModel> & Pick<StaticModel, 'model' | 'table'>): StaticModel {
@@ -60,6 +60,30 @@ afterAll(async () => {
 
 describe('PgCatalogSchemaProvider — physical resolution', () => {
   it('resolves a composite primary key (Membership) in column order', async () => {
+    const staticSchema = schema(
+      [
+        model({
+          model: 'Membership',
+          table: 'memberships',
+          fields: [
+            field('orgId', 'org_id', { isForeignKey: true }),
+            field('userId', 'user_id', { isForeignKey: true }),
+            field('role', 'role', { type: 'MemberRole', enumName: 'MemberRole' }),
+          ],
+          primaryKey: ['org_id', 'user_id'],
+        }),
+      ],
+      [{ name: 'MemberRole', dbName: 'member_role', values: ['OWNER', 'ADMIN', 'MEMBER'] }],
+    );
+
+    const resolved = await new PgCatalogSchemaProvider(staticSchema, pool).resolve();
+    const membership = resolved.byModel.get('Membership')!;
+    expect(membership.primaryKey).toEqual(['org_id', 'user_id']);
+    expect(membership.byColumn.get('org_id')?.typeOid).toBe(OID_UUID);
+    expect(membership.byColumn.get('role')?.enumValues).toEqual(['OWNER', 'ADMIN', 'MEMBER']);
+  });
+
+  it('leaves enumValues null (rather than throwing) when enumName is absent from "enums"', async () => {
     const staticSchema = schema([
       model({
         model: 'Membership',
@@ -74,9 +98,7 @@ describe('PgCatalogSchemaProvider — physical resolution', () => {
     ]);
 
     const resolved = await new PgCatalogSchemaProvider(staticSchema, pool).resolve();
-    const membership = resolved.byModel.get('Membership')!;
-    expect(membership.primaryKey).toEqual(['org_id', 'user_id']);
-    expect(membership.byColumn.get('org_id')?.typeOid).toBe(OID_UUID);
+    expect(resolved.byModel.get('Membership')?.byColumn.get('role')?.enumValues).toBeNull();
   });
 
   it('resolves a primary key that is also a foreign key (JobSettings.jobId)', async () => {

@@ -25,43 +25,27 @@ interface AttributeInfo {
   readonly typeOid: number;
   readonly typeName: string;
   readonly elementTypeOid: number | null;
+  readonly elementTypeName: string | null;
   readonly isCitext: boolean;
 }
 
 interface JoinTableGroup {
   readonly relationName: string;
-  /** The two participating Prisma model names, in the order first observed. */
   readonly participants: readonly [string, string];
   readonly namespace: string;
   readonly table: string;
 }
 
-/** Table lookup key, `"namespace.table"` — how the WAL identifies a relation too. */
 function tableKey(namespace: string, table: string): string {
   return `${namespace}.${table}`;
 }
 
-/** The publication pgbase decodes from, unless the consumer names another. */
 export const DEFAULT_PUBLICATION = 'pgbase';
 
 export interface PgCatalogSchemaProviderOptions {
-  /**
-   * Which publication to read column lists from.
-   *
-   * This has to be named rather than inferred. `pg_publication_rel` is keyed by
-   * (table, publication), so a table belonging to two publications can carry two *different*
-   * column lists, and picking one arbitrarily would silently mis-report `publicationColumns` —
-   * which the boot check below relies on to stop a table becoming unwritable. pgbase decodes
-   * from exactly one publication, so scoping to it is both correct and unambiguous.
-   */
   readonly publication?: string;
 }
 
-/**
- * Resolves a `StaticSchema` against a live Postgres `pg_catalog`. This is the only file in the
- * package that knows a schema came from Prisma at all (`SchemaProvider` is the seam) —
- * everything here is otherwise plain `pg.Pool` + SQL.
- */
 export class PgCatalogSchemaProvider implements SchemaProvider {
   private readonly publication: string;
 
@@ -123,6 +107,8 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
       attributesByOid,
     );
 
+    const enumValuesByName = new Map(this.staticSchema.enums.map((e) => [e.name, e.values]));
+
     const models: ResolvedModel[] = this.staticSchema.models.map((model) => {
       const row = tableByKey.get(tableKey(model.namespace, model.table))!;
       const oid = row.oid!;
@@ -136,12 +122,16 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
               `table "${model.namespace}.${model.table}". Check "@map" and that migrations ran.`,
           );
         }
+        const enumValues =
+          field.enumName !== null ? (enumValuesByName.get(field.enumName) ?? null) : null;
         return {
           ...field,
           typeOid: attr.typeOid,
           typeName: attr.typeName,
           elementTypeOid: attr.elementTypeOid,
+          elementTypeName: attr.elementTypeName,
           isCitext: attr.isCitext,
+          enumValues,
         };
       });
 
@@ -295,6 +285,7 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
       type_oid: number;
       type_name: string;
       element_type_oid: number | null;
+      element_type_name: string | null;
       is_citext: boolean;
     }>(
       `
@@ -305,9 +296,11 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
         t.oid::int AS type_oid,
         t.typname AS type_name,
         CASE WHEN t.typcategory = 'A' AND t.typelem <> 0 THEN t.typelem::int ELSE NULL END AS element_type_oid,
+        et.typname AS element_type_name,
         (t.typname = 'citext') AS is_citext
       FROM pg_attribute a
       JOIN pg_type t ON t.oid = a.atttypid
+      LEFT JOIN pg_type et ON et.oid = t.typelem AND t.typcategory = 'A' AND t.typelem <> 0
       WHERE a.attrelid = ANY($1::int[])
         AND a.attnum > 0
         AND NOT a.attisdropped
@@ -322,6 +315,7 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
         typeOid: row.type_oid,
         typeName: row.type_name,
         elementTypeOid: row.element_type_oid,
+        elementTypeName: row.element_type_name,
         isCitext: row.is_citext,
       });
       result.set(row.reloid, forTable);
@@ -329,22 +323,6 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
     return result;
   }
 
-  /**
-   * Publication column lists, from PG15+'s `pg_publication_rel.prattrs`, scoped to
-   * `this.publication`.
-   *
-   * Deliberately not a scan of every publication: `pg_publication_rel` is keyed by
-   * (table, publication), so the same table can carry a different column list in each one, and
-   * picking one arbitrarily would mis-report the value the boot check above depends on.
-   *
-   * A table absent from this publication, or present with unrestricted membership, resolves to
-   * `null` — "not published" and "published, all columns" only need to be told apart from
-   * "restricted to these columns", not from each other.
-   *
-   * A `FOR ALL TABLES` publication has no `pg_publication_rel` row for any table, so a plain
-   * join alone would report every table as "not published" and the check above would never
-   * fire — hence the separate `puballtables` branch below, unrestricted by definition.
-   */
   private async fetchPublicationColumns(
     oids: readonly number[],
     attributesByOid: ReadonlyMap<number, ReadonlyMap<string, AttributeInfo>>,
@@ -416,11 +394,6 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
     return result;
   }
 
-  /**
-   * Resolves `columnA`/`columnB`/`modelA`/`modelB` for each discovered implicit m2m join table
-   * from its actual foreign keys — never by parsing the table name further, which breaks on
-   * model names that themselves contain the `To` separator Prisma uses to build that name.
-   */
   private async resolveJoinTables(
     groups: readonly JoinTableGroup[],
     tableByKey: ReadonlyMap<string, TableRow>,

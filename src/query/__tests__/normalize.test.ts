@@ -19,9 +19,23 @@ function field(name: string, overrides: Partial<ResolvedField> = {}): ResolvedFi
     typeOid: OID.TEXT,
     typeName: 'text',
     elementTypeOid: null,
+    elementTypeName: null,
     isCitext: false,
+    enumValues: null,
     ...overrides,
   };
+}
+
+const STATUS_VALUES = ['QUEUED', 'RUNNING', 'DONE', 'FAILED'] as const;
+
+function statusField(overrides: Partial<ResolvedField> = {}): ResolvedField {
+  return field('status', {
+    typeOid: 99999,
+    typeName: 'job_status',
+    enumName: 'JobStatus',
+    enumValues: STATUS_VALUES,
+    ...overrides,
+  });
 }
 
 const fields = [
@@ -31,6 +45,7 @@ const fields = [
   field('active', { typeOid: OID.BOOL }),
   field('tags', { typeOid: OID.TEXT, elementTypeOid: OID.TEXT, isList: true }),
   field('meta', { typeOid: OID.JSONB }),
+  statusField(),
 ];
 
 const model = {
@@ -79,8 +94,26 @@ describe('normalize', () => {
     expect(node).toEqual({
       kind: 'and',
       children: [
-        { kind: 'not', child: { kind: 'compare', field: field('name'), op: 'equals', value: 'a', insensitive: false } },
-        { kind: 'not', child: { kind: 'compare', field: field('name'), op: 'equals', value: 'b', insensitive: false } },
+        {
+          kind: 'not',
+          child: {
+            kind: 'compare',
+            field: field('name'),
+            op: 'equals',
+            value: 'a',
+            insensitive: false,
+          },
+        },
+        {
+          kind: 'not',
+          child: {
+            kind: 'compare',
+            field: field('name'),
+            op: 'equals',
+            value: 'b',
+            insensitive: false,
+          },
+        },
       ],
     });
   });
@@ -109,21 +142,37 @@ describe('normalize', () => {
   });
 
   it('rejects mode:insensitive on a non-text column', () => {
-    expect(() => normalize({ age: { equals: 1, mode: 'insensitive' } as never }, model, allowed)).toThrow(/mode/i);
+    expect(() =>
+      normalize({ age: { equals: 1, mode: 'insensitive' } as never }, model, allowed),
+    ).toThrow(/mode/i);
   });
 
   it('rejects mode:insensitive with no compatible op at the same level', () => {
-    expect(() => normalize({ name: { in: ['a'], mode: 'insensitive' } }, model, allowed)).toThrow(/mode/i);
+    expect(() => normalize({ name: { in: ['a'], mode: 'insensitive' } }, model, allowed)).toThrow(
+      /mode/i,
+    );
   });
 
   it('accepts mode:insensitive alongside contains', () => {
     const node = normalize({ name: { contains: 'x', mode: 'insensitive' } }, model, allowed);
-    expect(node).toEqual({ kind: 'compare', field: field('name'), op: 'contains', value: 'x', insensitive: true });
+    expect(node).toEqual({
+      kind: 'compare',
+      field: field('name'),
+      op: 'contains',
+      value: 'x',
+      insensitive: true,
+    });
   });
 
   it('in: [] is FALSE, notIn: [] is TRUE', () => {
-    expect(normalize({ age: { in: [] } }, model, allowed)).toEqual({ kind: 'literal', value: false });
-    expect(normalize({ age: { notIn: [] } }, model, allowed)).toEqual({ kind: 'literal', value: true });
+    expect(normalize({ age: { in: [] } }, model, allowed)).toEqual({
+      kind: 'literal',
+      value: false,
+    });
+    expect(normalize({ age: { notIn: [] } }, model, allowed)).toEqual({
+      kind: 'literal',
+      value: true,
+    });
   });
 
   it('list fields reject "not"', () => {
@@ -133,7 +182,12 @@ describe('normalize', () => {
   it('isEmpty: false is NOT(isEmpty)', () => {
     expect(normalize({ tags: { isEmpty: false } }, model, allowed)).toEqual({
       kind: 'not',
-      child: { kind: 'list', field: field('tags', { typeOid: OID.TEXT, elementTypeOid: OID.TEXT, isList: true }), op: 'isEmpty', values: [] },
+      child: {
+        kind: 'list',
+        field: field('tags', { typeOid: OID.TEXT, elementTypeOid: OID.TEXT, isList: true }),
+        op: 'isEmpty',
+        values: [],
+      },
     });
   });
 
@@ -141,7 +195,13 @@ describe('normalize', () => {
     const node = normalize({ name: { not: { contains: 'x' } } }, model, allowed);
     expect(node).toEqual({
       kind: 'not',
-      child: { kind: 'compare', field: field('name'), op: 'contains', value: 'x', insensitive: false },
+      child: {
+        kind: 'compare',
+        field: field('name'),
+        op: 'contains',
+        value: 'x',
+        insensitive: false,
+      },
     });
   });
 
@@ -150,13 +210,64 @@ describe('normalize', () => {
     expect(node).toEqual({
       kind: 'and',
       children: [
-        { kind: 'compare', field: field('age', { typeOid: OID.INT4 }), op: 'gt', value: 1, insensitive: false },
-        { kind: 'compare', field: field('age', { typeOid: OID.INT4 }), op: 'lt', value: 10, insensitive: false },
+        {
+          kind: 'compare',
+          field: field('age', { typeOid: OID.INT4 }),
+          op: 'gt',
+          value: 1,
+          insensitive: false,
+        },
+        {
+          kind: 'compare',
+          field: field('age', { typeOid: OID.INT4 }),
+          op: 'lt',
+          value: 10,
+          insensitive: false,
+        },
       ],
     });
   });
 
   it('a value that cannot be coerced throws at normalize time', () => {
     expect(() => normalize({ age: { equals: 'not-a-number' } as never }, model, allowed)).toThrow();
+  });
+
+  it('enum: valid members normalize as ordinary scalar compare/set nodes', () => {
+    expect(normalize({ status: 'RUNNING' }, model, allowed)).toEqual({
+      kind: 'compare',
+      field: statusField(),
+      op: 'equals',
+      value: 'RUNNING',
+      insensitive: false,
+    });
+    expect(normalize({ status: { gt: 'QUEUED' } }, model, allowed)).toEqual({
+      kind: 'compare',
+      field: statusField(),
+      op: 'gt',
+      value: 'QUEUED',
+      insensitive: false,
+    });
+    expect(normalize({ status: { in: ['QUEUED', 'RUNNING'] } }, model, allowed)).toEqual({
+      kind: 'set',
+      field: statusField(),
+      op: 'in',
+      values: ['QUEUED', 'RUNNING'],
+    });
+  });
+
+  it('enum: a value outside the declared members is rejected, naming the field and valid values', () => {
+    expect(() => normalize({ status: 'NOT_A_STATUS' }, model, allowed)).toThrow(/"status"/);
+    expect(() => normalize({ status: 'NOT_A_STATUS' }, model, allowed)).toThrow(
+      /QUEUED, RUNNING, DONE, FAILED/,
+    );
+    expect(() => normalize({ status: { in: ['QUEUED', 'NOPE'] } }, model, allowed)).toThrow(
+      /QUEUED, RUNNING, DONE, FAILED/,
+    );
+  });
+
+  it('enum: "mode: insensitive" is rejected — an enum is not text', () => {
+    expect(() =>
+      normalize({ status: { equals: 'RUNNING', mode: 'insensitive' } as never }, model, allowed),
+    ).toThrow(/mode/i);
   });
 });

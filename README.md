@@ -24,11 +24,11 @@ The backend writes **no read endpoints**.
 Cost regimes differ by orders of magnitude between a one-shot read and a live subscription, so
 they don't get the same capability budget.
 
-| Tier | Transport | Capability | Declaration |
-|---|---|---|---|
-| 1 | one-shot | Prisma's own args, narrowed to view fields — relation filters, includes, related counts | none |
-| 2 | live, incremental | predicates over the entity's own columns | none |
-| 3 | live, re-run-on-trigger | joins/aggregates kept live | explicit, per model |
+| Tier | Transport               | Capability                                                                              | Declaration         |
+| ---- | ----------------------- | --------------------------------------------------------------------------------------- | ------------------- |
+| 1    | one-shot                | Prisma's own args, narrowed to view fields — relation filters, includes, related counts | none                |
+| 2    | live, incremental       | predicates over the entity's own columns                                                | none                |
+| 3    | live, re-run-on-trigger | joins/aggregates kept live                                                              | explicit, per model |
 
 ## Getting started
 
@@ -58,7 +58,7 @@ build output, not source:
 <details>
 <summary>Why a second generated artifact is necessary</summary>
 
-Logical decoding reports *physical* names — `jobs`, `created_at` — never the Prisma names `Job`
+Logical decoding reports _physical_ names — `jobs`, `created_at` — never the Prisma names `Job`
 and `createdAt`. Mapping a WAL event back to a model, a policy, and a transform therefore needs
 that mapping as runtime **data**, and TypeScript types are erased at runtime.
 
@@ -88,15 +88,64 @@ table at DML time.
 
 ## Subpath exports
 
-| Import | Contents |
-|---|---|
-| `@workspace/pgbase` | core — the query AST, the shared evaluator, wire types |
-| `@workspace/pgbase/nest` | `PgbaseModule`, `definePolicy`, the WAL leader, the socket gateway |
-| `@workspace/pgbase/client` | framework-agnostic client |
-| `@workspace/pgbase/react` | RTK Query bindings and hooks |
+| Import                     | Contents                                                 |
+| -------------------------- | -------------------------------------------------------- |
+| `@workspace/pgbase`        | core — the query AST, the shared evaluator, wire types   |
+| `@workspace/pgbase/nest`   | `PgbaseModule`, `PgbaseReadService`, `ScopedPrismaToken` |
+| `@workspace/pgbase/policy` | `definePolicy` and the policy registry types             |
+| `@workspace/pgbase/client` | framework-agnostic client                                |
+| `@workspace/pgbase/react`  | RTK Query bindings and hooks                             |
 
 The core is dependency-light on purpose: the same `evaluate` runs on the server (against WAL
 tuples) and in the browser (to fan one socket-level subscription out to many component queries).
+
+### Injecting policy-scoped Prisma
+
+Declare one token class for your app, and every read through it is scoped by the caller's claims:
+
+```ts
+// pgbase/scoped-db.ts
+export class ScopedDb extends ScopedPrismaToken<PrismaClient, typeof pgbasePolicies>() {}
+
+// app.module.ts
+PgbaseModule.forRoot({ /* … */ scopedPrisma: ScopedDb })
+
+// anywhere
+constructor(private readonly db: ScopedDb) {}
+await this.db.job.findMany({ where: { priority: { gte: 1 } } });
+```
+
+The token is a class rather than a symbol so it carries your client and policy registry as
+generics — `db.job` is typed from your schema, models without a policy don't exist on it, and no
+`@Inject` is needed. `db.runUnscoped(reason, fn)` is the deliberate escape hatch.
+
+### Registering the module
+
+`forRootAsync` takes the Prisma client and the schema pool from the container, so you build them
+the ordinary way instead of at module scope:
+
+```ts
+PgbaseModule.forRootAsync({
+  imports: [PrismaModule, SchemaPoolModule, ClaimsModule],
+  inject: [PrismaService, SCHEMA_POOL, OrgMembershipClaimsBuilder],
+  useFactory: (prisma: PrismaService, pool: Pool, claimsBuilder: OrgMembershipClaimsBuilder) => ({
+    pool,
+    prisma,
+    schema: pgbaseSchema,
+    policies: pgbasePolicies,
+    claimsBuilder,
+    getPrincipal,
+  }),
+  scopedPrisma: ScopedDb,
+});
+```
+
+Your `ClaimsBuilder` is an ordinary provider — inject a repository, a feature-flag service, a
+cache, whatever it needs.
+
+`scopedPrisma` and `routePrefix` sit outside the factory because they are read while the module
+definition is built — the DI token and the controller's route exist before any provider runs.
+`forRoot` is the same thing with a constant factory, for apps with nothing to inject.
 
 ## Scripts
 

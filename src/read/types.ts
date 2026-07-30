@@ -28,7 +28,7 @@ export interface ScopedRead {
 
 export interface ResultPlan {
   readonly model: string;
-  readonly transform: (row: unknown) => unknown;
+  readonly project: (row: unknown) => unknown;
   readonly relations: ReadonlyMap<string, ResultPlan>;
 }
 

@@ -1,8 +1,6 @@
 import type { Comparator } from './ast.js';
 import { QueryError } from './errors.js';
 
-/** Stable `pg_type` builtin OIDs this package understands. Never guess at extension OIDs (e.g.
- * citext) — those are assigned per-install and must be identified via `ResolvedField.isCitext`. */
 export const OID = {
   BOOL: 16,
   INT8: 20,
@@ -25,8 +23,6 @@ export const OID = {
 const TEXT_OIDS = new Set<number>([OID.TEXT, OID.VARCHAR, OID.BPCHAR]);
 const JSON_OIDS = new Set<number>([OID.JSON, OID.JSONB]);
 
-/** Sentinel for the JSON *value* `null` (`'null'::jsonb`), distinct from the column being SQL
- * NULL. Using plain `null` for both would make them indistinguishable on both interpreters. */
 export const JSON_NULL: unique symbol = Symbol('pgbase.jsonNull');
 
 export function isTextOid(oid: number): boolean {
@@ -331,6 +327,36 @@ const timestampHandler: TypeHandler = {
   equals: (a, b) => a === b,
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// enum — ordered by DECLARATION index, never by text. Postgres enums sort by the order the
+// labels were declared in, which routinely disagrees with lexical order (e.g. job_status:
+// QUEUED < RUNNING < DONE < FAILED, where 'RUNNING' > 'FAILED' as text). Enum oids are
+// per-install, so this is reached via `ResolvedField.enumValues`, never a `typeOid` switch.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function enumIndex(values: readonly string[], v: unknown, label: string): number {
+  const i = values.indexOf(v as string);
+  if (i === -1) {
+    throw new QueryError(
+      `Field "${label}": ${JSON.stringify(v)} is not a member of this enum. Valid values: ` +
+        `${values.join(', ')}.`,
+    );
+  }
+  return i;
+}
+
+function enumHandler(values: readonly string[]): TypeHandler {
+  return {
+    coerce: (raw, label) => {
+      if (typeof raw !== 'string') return fail(label, 'a string');
+      enumIndex(values, raw, label);
+      return raw;
+    },
+    compare: (a, b) => Math.sign(enumIndex(values, a, '') - enumIndex(values, b, '')),
+    equals: (a, b) => a === b,
+  };
+}
+
 const jsonHandler: TypeHandler = {
   coerce: (raw, label) => {
     if (raw === JSON_NULL) return raw;
@@ -367,7 +393,8 @@ const HANDLERS = new Map<number, TypeHandler>([
   [OID.JSONB, jsonHandler],
 ]);
 
-function handlerFor(oid: number): TypeHandler {
+function handlerFor(oid: number, enumValues: readonly string[] | null): TypeHandler {
+  if (enumValues !== null) return enumHandler(enumValues);
   const h = HANDLERS.get(oid);
   if (!h)
     throw new QueryError(
@@ -396,9 +423,13 @@ function arrayComparator(element: Comparator): Comparator {
   };
 }
 
-export function getComparator(typeOid: number, elementTypeOid: number | null): Comparator {
-  if (elementTypeOid !== null) return arrayComparator(handlerFor(elementTypeOid));
-  return handlerFor(typeOid);
+export function getComparator(
+  typeOid: number,
+  elementTypeOid: number | null,
+  enumValues: readonly string[] | null = null,
+): Comparator {
+  if (elementTypeOid !== null) return arrayComparator(handlerFor(elementTypeOid, enumValues));
+  return handlerFor(typeOid, enumValues);
 }
 
 export function coerceValue(
@@ -406,21 +437,22 @@ export function coerceValue(
   elementTypeOid: number | null,
   raw: unknown,
   fieldLabel: string,
+  enumValues: readonly string[] | null = null,
 ): unknown {
   if (elementTypeOid !== null) {
     if (!Array.isArray(raw)) return fail(fieldLabel, 'an array');
-    const eh = handlerFor(elementTypeOid);
+    const eh = handlerFor(elementTypeOid, enumValues);
     return raw.map((el) => {
       if (el === null)
         throw new QueryError(`Field "${fieldLabel}": array elements cannot be null.`);
       return eh.coerce(el, fieldLabel);
     });
   }
-  return handlerFor(typeOid).coerce(raw, fieldLabel);
+  return handlerFor(typeOid, enumValues).coerce(raw, fieldLabel);
 }
 
-/** Text-input representation of a single coerced scalar value, for SQL parameter binding. */
-export function formatParamText(oid: number, value: unknown): string {
+export function formatParamText(oid: number, value: unknown, isEnum = false): string {
+  if (isEnum) return value as string;
   switch (oid) {
     case OID.BOOL:
       return value ? 'true' : 'false';
@@ -453,9 +485,13 @@ export function formatParamText(oid: number, value: unknown): string {
 }
 
 /** Postgres array-literal text (`{a,b,c}`), each element quoted/escaped unconditionally. */
-export function formatArrayLiteral(elementOid: number, values: readonly unknown[]): string {
+export function formatArrayLiteral(
+  elementOid: number,
+  values: readonly unknown[],
+  isEnum = false,
+): string {
   const parts = values.map((v) => {
-    const text = formatParamText(elementOid, v);
+    const text = formatParamText(elementOid, v, isEnum);
     // A NULL element is the bare word NULL; quoting it would store the 4-character string "NULL".
     if (text === null) return 'NULL';
     return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;

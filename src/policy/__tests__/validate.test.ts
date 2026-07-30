@@ -26,26 +26,19 @@ afterAll(async () => {
   await pool.end();
 });
 
-const jobPolicy = definePolicy('Job', {
-  transform: (row: { id: string; orgId: string }) => ({ id: row.id, orgId: row.orgId }),
+type Row = Record<string, unknown>;
+
+const jobPolicy = definePolicy<Row, unknown>('Job')({ rls: () => ({}) });
+const jobSettingsPolicy = definePolicy<Row, unknown>('JobSettings')({
+  omit: ['webhookSecret'],
   rls: () => ({}),
 });
-const jobSettingsPolicy = definePolicy('JobSettings', {
-  transform: (row: { jobId: string }) => ({ jobId: row.jobId }),
+const membershipPolicy = definePolicy<Row, unknown>('Membership')({ rls: () => ({}) });
+const auditLogPolicy = definePolicy<Row, unknown>('AuditLog')({
+  omit: ['action', 'actorId', 'at'],
   rls: () => ({}),
 });
-const membershipPolicy = definePolicy('Membership', {
-  transform: (row: { orgId: string }) => ({ orgId: row.orgId }),
-  rls: () => ({}),
-});
-const auditLogPolicy = definePolicy('AuditLog', {
-  transform: (row: { id: bigint }) => ({ id: row.id }),
-  rls: () => ({}),
-});
-const taskPolicy = definePolicy('Task', {
-  transform: (row: { id: string }) => ({ id: row.id }),
-  rls: () => ({}),
-});
+const taskPolicy = definePolicy<Row, unknown>('Task')({ rls: () => ({}) });
 
 const FULL_REGISTRY = {
   Job: jobPolicy,
@@ -91,24 +84,39 @@ describe('validatePolicies — registry exhaustiveness', () => {
   });
 });
 
-describe('validatePolicies — transform must expose something', () => {
-  it('throws when every column probes absent', async () => {
+describe('validatePolicies — omit naming an unknown field fails at boot', () => {
+  it('throws, naming the model and field', async () => {
     const schema = await resolveFixtureSchema(pool);
     const registry = {
       ...FULL_REGISTRY,
-      Job: definePolicy('Job', { transform: () => ({}), rls: () => ({}) }),
+      Job: definePolicy<Row, unknown>('Job')({ omit: ['doesNotExist'], rls: () => ({}) }),
     };
 
-    expect(() => validatePolicies(schema, registry)).toThrow(/Job.*expose/is);
+    expect(() => validatePolicies(schema, registry)).toThrow(/Job.*doesNotExist/is);
+  });
+});
+
+describe('validatePolicies — omit must not hide every column', () => {
+  it('throws when omit lists every field on the model', async () => {
+    const schema = await resolveFixtureSchema(pool);
+    const registry = {
+      ...FULL_REGISTRY,
+      Task: definePolicy<Row, unknown>('Task')({
+        omit: ['id', 'orgId', 'jobId', 'title', 'done', 'blockedBy', 'createdAt'],
+        rls: () => ({}),
+      }),
+    };
+
+    expect(() => validatePolicies(schema, registry)).toThrow(/Task.*nothing is exposed/is);
   });
 });
 
 describe('validatePolicies — REPLICA IDENTITY vs filterable-not-subset-of-PK', () => {
-  it('fires on AuditLog (not FULL) when a non-PK column is filterable', async () => {
+  it('fires on AuditLog (not FULL) when a non-PK column is left visible', async () => {
     const schema = await resolveOne(pool, AUDIT_LOG_MODEL);
     const registry = {
-      AuditLog: definePolicy('AuditLog', {
-        transform: (row: { id: bigint; action: string }) => ({ id: row.id, action: row.action }),
+      AuditLog: definePolicy<Row, unknown>('AuditLog')({
+        omit: ['actorId', 'at'],
         rls: () => ({}),
       }),
     };
@@ -120,14 +128,7 @@ describe('validatePolicies — REPLICA IDENTITY vs filterable-not-subset-of-PK',
   it('does not fire on Membership (FULL) even though `role` is outside the composite PK', async () => {
     const schema = await resolveOne(pool, MEMBERSHIP_MODEL);
     const registry = {
-      Membership: definePolicy('Membership', {
-        transform: (row: { orgId: string; userId: string; role: string }) => ({
-          orgId: row.orgId,
-          userId: row.userId,
-          role: row.role,
-        }),
-        rls: () => ({}),
-      }),
+      Membership: definePolicy<Row, unknown>('Membership')({ rls: () => ({}) }),
     };
 
     const result = validatePolicies(schema, registry);
@@ -137,8 +138,8 @@ describe('validatePolicies — REPLICA IDENTITY vs filterable-not-subset-of-PK',
   it('does not fire when filterable stays within the primary key, even off FULL', async () => {
     const schema = await resolveOne(pool, AUDIT_LOG_MODEL);
     const registry = {
-      AuditLog: definePolicy('AuditLog', {
-        transform: (row: { id: bigint }) => ({ id: row.id }),
+      AuditLog: definePolicy<Row, unknown>('AuditLog')({
+        omit: ['action', 'actorId', 'at'],
         rls: () => ({}),
       }),
     };

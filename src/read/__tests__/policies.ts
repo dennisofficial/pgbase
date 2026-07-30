@@ -13,39 +13,61 @@ export interface Claims {
 export const ORG_1 = '11111111-1111-4111-8111-111111111111';
 export const ORG_2 = '22222222-2222-4222-8222-222222222222';
 
-export const orgPolicy = definePolicy<{ id: string; name: string; slug: string }, unknown, Claims>(
-  'Org',
-  {
-    transform: (row) => ({ id: row.id, name: row.name, slug: row.slug }),
-    rls: (claims) => ({ id: claims.orgId }),
-  },
-);
+interface OrgRow {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
 
-export const jobPolicy = definePolicy<
-  { id: string; orgId: string; name: string; status: string; priority: number },
-  unknown,
-  Claims
->('Job', {
-  transform: (row) => ({ id: row.id, name: row.name, status: row.status, priority: row.priority }),
+export const orgPolicy = definePolicy<OrgRow, Claims>('Org')({
+  omit: ['createdAt', 'updatedAt'],
+  rls: (claims) => ({ id: claims.orgId }),
+});
+
+interface JobRow {
+  readonly id: string;
+  readonly orgId: string;
+  readonly name: string;
+  readonly status: string;
+  readonly priority: number;
+  readonly labels: readonly string[];
+  readonly metadata: unknown;
+  readonly closedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+}
+
+export const jobPolicy = definePolicy<JobRow, Claims>('Job')({
+  omit: ['orgId', 'labels', 'metadata', 'closedAt', 'createdAt', 'updatedAt'],
   rls: (claims) => ({ orgId: claims.orgId }),
 });
 
-export const taskPolicy = definePolicy<
-  { id: string; orgId: string; jobId: string; title: string; done: boolean },
-  unknown,
-  Claims
->('Task', {
-  transform: (row) => ({ id: row.id, title: row.title, done: row.done }),
+interface TaskRow {
+  readonly id: string;
+  readonly orgId: string;
+  readonly jobId: string;
+  readonly title: string;
+  readonly done: boolean;
+  readonly blockedBy: unknown;
+  readonly createdAt: Date;
+}
+
+export const taskPolicy = definePolicy<TaskRow, Claims>('Task')({
+  omit: ['orgId', 'jobId', 'blockedBy', 'createdAt'],
   rls: (claims) => ({ orgId: claims.orgId }),
 });
 
-/** Omits `webhookSecret` — the transform a JobSettings policy would actually ship with. */
-export const jobSettingsPolicyVisible = definePolicy<
-  { jobId: string; concurrency: number; webhookSecret: string },
-  unknown,
-  Claims
->('JobSettings', {
-  transform: (row) => ({ jobId: row.jobId, concurrency: row.concurrency }),
+interface JobSettingsRow {
+  readonly jobId: string;
+  readonly concurrency: number;
+  readonly webhookSecret: string;
+}
+
+/** Omits `webhookSecret` — the policy a JobSettings model would actually ship with. */
+export const jobSettingsPolicyVisible = definePolicy<JobSettingsRow, Claims>('JobSettings')({
+  omit: ['webhookSecret'],
   rls: () => ({}),
 });
 
@@ -61,7 +83,7 @@ export const REGISTRY_HIDDEN_SETTINGS = {
   JobSettings: NO_CLIENT_ACCESS,
 } satisfies Record<string, PolicyEntry<any, any, any>>;
 
-/** JobSettings reachable, but its transform still withholds `webhookSecret`. */
+/** JobSettings reachable, but its policy still withholds `webhookSecret`. */
 export const REGISTRY_VISIBLE_SETTINGS = {
   ...BASE_REGISTRY,
   JobSettings: jobSettingsPolicyVisible,

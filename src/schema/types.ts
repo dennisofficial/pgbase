@@ -66,7 +66,9 @@ export interface ResolvedField extends StaticField {
   readonly typeOid: number;
   readonly typeName: string;
   readonly elementTypeOid: number | null;
+  readonly elementTypeName: string | null;
   readonly isCitext: boolean;
+  readonly enumValues: readonly string[] | null;
 }
 
 export interface ResolvedRelation extends StaticRelation {

@@ -1,9 +1,3 @@
-/**
- * The load-bearing correctness suite (docs/DESIGN.md §4.1): for every generated `PredicateNode`,
- * `evaluate(node, row)` must agree with row membership in `SELECT * FROM t WHERE compileSql(node)`
- * on a real Postgres. Generation is fully enumerated over a hand-picked boundary-value corpus —
- * no randomness, so no seed to print.
- */
 import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestPool } from '../../schema/test-support.js';
@@ -15,11 +9,13 @@ import { evaluate } from '../evaluate.js';
 import {
   ARR,
   DATE,
+  ENUM_VALUES,
   F8,
   I8,
   JS,
   NUM,
   ROWS,
+  STATUS,
   TABLE,
   TS,
   TSTZ,
@@ -63,7 +59,8 @@ function describeValue(v: unknown): unknown {
 function describeNode(node: PredicateNode): unknown {
   return JSON.parse(
     JSON.stringify(node, (key, value) => {
-      if (key === 'field' && value && typeof value === 'object') return `<field ${(value as ResolvedField).column}>`;
+      if (key === 'field' && value && typeof value === 'object')
+        return `<field ${(value as ResolvedField).column}>`;
       if (typeof value === 'bigint') return `${value}n`;
       if (value === JSON_NULL) return '<JSON_NULL>';
       return value;
@@ -86,7 +83,9 @@ async function assertAgrees(node: PredicateNode): Promise<void> {
     const sqlSays = matched.has(row.id as number);
     const jsSays = evaluate(node, row);
     if (sqlSays !== jsSays) {
-      const rowDump = Object.fromEntries(Object.entries(row).map(([k, v]) => [k, describeValue(v)]));
+      const rowDump = Object.fromEntries(
+        Object.entries(row).map(([k, v]) => [k, describeValue(v)]),
+      );
       throw new Error(
         `Divergence on row id=${row.id}\n` +
           `predicate: ${JSON.stringify(describeNode(node))}\n` +
@@ -125,7 +124,10 @@ function scalarPredicates(f: ResolvedField, pool_: readonly unknown[]): Predicat
       { kind: 'set', field: f, op: 'notIn', values: [] },
     );
   }
-  nodes.push({ kind: 'isNull', field: f, negated: false }, { kind: 'isNull', field: f, negated: true });
+  nodes.push(
+    { kind: 'isNull', field: f, negated: false },
+    { kind: 'isNull', field: f, negated: true },
+  );
   return nodes;
 }
 
@@ -161,7 +163,10 @@ function jsonPredicates(f: ResolvedField, pool_: readonly unknown[]): PredicateN
       { kind: 'compare', field: f, op: 'not', value: v, insensitive: false },
     );
   }
-  nodes.push({ kind: 'isNull', field: f, negated: false }, { kind: 'isNull', field: f, negated: true });
+  nodes.push(
+    { kind: 'isNull', field: f, negated: false },
+    { kind: 'isNull', field: f, negated: true },
+  );
   return nodes;
 }
 
@@ -187,6 +192,40 @@ function listPredicates(f: ResolvedField, elementPool: readonly string[]): Predi
   return nodes;
 }
 
+function enumListPredicates(f: ResolvedField): PredicateNode[] {
+  const nodes: PredicateNode[] = [
+    { kind: 'list', field: f, op: 'isEmpty', values: [] },
+    { kind: 'not', child: { kind: 'list', field: f, op: 'isEmpty', values: [] } },
+    {
+      kind: 'compare',
+      field: f,
+      op: 'equals',
+      value: [STATUS.queued, STATUS.running],
+      insensitive: false,
+    },
+    { kind: 'compare', field: f, op: 'equals', value: [] as readonly string[], insensitive: false },
+    {
+      kind: 'compare',
+      field: f,
+      op: 'not',
+      value: [STATUS.queued, STATUS.running],
+      insensitive: false,
+    },
+    { kind: 'isNull', field: f, negated: false },
+    { kind: 'isNull', field: f, negated: true },
+  ];
+  for (const v of ENUM_VALUES) {
+    nodes.push({ kind: 'list', field: f, op: 'has', values: [v] });
+  }
+  nodes.push(
+    { kind: 'list', field: f, op: 'hasSome', values: [STATUS.running, STATUS.done] },
+    { kind: 'list', field: f, op: 'hasEvery', values: [STATUS.queued, STATUS.running] },
+    { kind: 'list', field: f, op: 'hasSome', values: [] },
+    { kind: 'list', field: f, op: 'hasEvery', values: [] },
+  );
+  return nodes;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Atomic operator coverage — every operator x every hazardous type
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,13 +243,34 @@ describe('differential: atomic predicates, every operator x every type', () => {
   });
 
   it('int8 — 2^53 neighbourhood, sign, and 64-bit extremes', async () => {
-    const pool_ = [I8.zero, I8.one, I8.negOne, I8.safeMax, I8.safePlus1, I8.safePlus2, I8.safePlus3, I8.negSafePlus2, I8.int8Max, I8.int8Min];
+    const pool_ = [
+      I8.zero,
+      I8.one,
+      I8.negOne,
+      I8.safeMax,
+      I8.safePlus1,
+      I8.safePlus2,
+      I8.safePlus3,
+      I8.negSafePlus2,
+      I8.int8Max,
+      I8.int8Min,
+    ];
     await assertAllAgree(scalarPredicates(field('c_int8'), pool_));
     await assertAllAgree(scalarPredicates(field('c_int8_n'), pool_));
   });
 
   it('numeric — trailing scale digits, sign, negative zero', async () => {
-    const pool_ = [NUM.zero, NUM.negZero, NUM.one, NUM.onePlusEps, NUM.negOne, NUM.negOnePlusEps, NUM.small, NUM.negSmall, NUM.big];
+    const pool_ = [
+      NUM.zero,
+      NUM.negZero,
+      NUM.one,
+      NUM.onePlusEps,
+      NUM.negOne,
+      NUM.negOnePlusEps,
+      NUM.small,
+      NUM.negSmall,
+      NUM.big,
+    ];
     await assertAllAgree(scalarPredicates(field('c_numeric'), pool_));
     await assertAllAgree(scalarPredicates(field('c_numeric_n'), pool_));
   });
@@ -246,13 +306,35 @@ describe('differential: atomic predicates, every operator x every type', () => {
   });
 
   it('text — empty, LIKE metacharacters, unicode, case, contains/startsWith/endsWith, mode:insensitive', async () => {
-    const pool_ = [TXT.empty, TXT.a, TXT.A, TXT.ab, TXT.percent, TXT.underscore, TXT.backslash, TXT.unicode, TXT.unicodeUpper, TXT.mixedCase, TXT.dup];
+    const pool_ = [
+      TXT.empty,
+      TXT.a,
+      TXT.A,
+      TXT.ab,
+      TXT.percent,
+      TXT.underscore,
+      TXT.backslash,
+      TXT.unicode,
+      TXT.unicodeUpper,
+      TXT.mixedCase,
+      TXT.dup,
+    ];
     await assertAllAgree(textPredicates(field('c_text'), pool_));
     await assertAllAgree(textPredicates(field('c_text_n'), pool_));
   });
 
   it('jsonb — structural equality, JSON null vs SQL null', async () => {
-    const pool_ = [JS.emptyObj, JS.a1, JS.a2, JS.arr123, JS.str, JS.num, JS.bool, JS.nested, JS.jsonNull];
+    const pool_ = [
+      JS.emptyObj,
+      JS.a1,
+      JS.a2,
+      JS.arr123,
+      JS.str,
+      JS.num,
+      JS.bool,
+      JS.nested,
+      JS.jsonNull,
+    ];
     await assertAllAgree(jsonPredicates(field('c_json'), pool_));
     await assertAllAgree(jsonPredicates(field('c_json_n'), pool_));
   });
@@ -260,6 +342,18 @@ describe('differential: atomic predicates, every operator x every type', () => {
   it('text[] — has/hasSome/hasEvery/isEmpty, empty and duplicate arrays', async () => {
     await assertAllAgree(listPredicates(field('c_arr'), ['a', 'b', 'x', '']));
     await assertAllAgree(listPredicates(field('c_arr_n'), ['a', 'b', 'x', '']));
+  });
+
+  // Native Postgres enum. `ENUM_VALUES` (QUEUED, RUNNING, DONE, FAILED) is declared in an order
+  // that DISAGREES with text order on RUNNING/FAILED — the exact case a text-comparator
+  // regression would flip. Covers every operator, a nullable column with NULLs, and enum arrays.
+  it('enum — declaration order disagrees with text order (RUNNING/FAILED)', async () => {
+    await assertAllAgree(scalarPredicates(field('c_enum'), [...ENUM_VALUES]));
+    await assertAllAgree(scalarPredicates(field('c_enum_n'), [...ENUM_VALUES]));
+  });
+
+  it('enum[] — has/hasSome/hasEvery/isEmpty, whole-array equals', async () => {
+    await assertAllAgree(enumListPredicates(field('c_enum_arr')));
   });
 });
 
@@ -304,6 +398,30 @@ describe('differential: nested boolean combinators', () => {
     await assertAgrees({ kind: 'not', child: { kind: 'isNull', field: int8n(), negated: false } });
   });
 
+  it('NOT over an enum comparison on a nullable column (some rows NULL, some not)', async () => {
+    const enumN = () => field('c_enum_n');
+    await assertAgrees({
+      kind: 'not',
+      child: {
+        kind: 'compare',
+        field: enumN(),
+        op: 'equals',
+        value: STATUS.failed,
+        insensitive: false,
+      },
+    });
+    await assertAgrees({
+      kind: 'not',
+      child: {
+        kind: 'compare',
+        field: enumN(),
+        op: 'gt',
+        value: STATUS.queued,
+        insensitive: false,
+      },
+    });
+  });
+
   // `has` compiles to `= ANY(col)`, which propagates NULL through a stored NULL *element*: a
   // non-match is unknown, not false. Only observable under NOT — unnegated, unknown and false
   // both just exclude the row. `hasSome`/`hasEvery` (`&&`/`@>`) do NOT propagate; they are here
@@ -320,9 +438,27 @@ describe('differential: nested boolean combinators', () => {
   });
 
   it('3-deep: NOT(AND(a, OR(b, NOT(c))))', async () => {
-    const a: PredicateNode = { kind: 'compare', field: int8(), op: 'gte', value: I8.zero, insensitive: false };
-    const b: PredicateNode = { kind: 'compare', field: text(), op: 'startsWith', value: TXT.a, insensitive: false };
-    const c: PredicateNode = { kind: 'compare', field: int8n(), op: 'lt', value: I8.zero, insensitive: false };
+    const a: PredicateNode = {
+      kind: 'compare',
+      field: int8(),
+      op: 'gte',
+      value: I8.zero,
+      insensitive: false,
+    };
+    const b: PredicateNode = {
+      kind: 'compare',
+      field: text(),
+      op: 'startsWith',
+      value: TXT.a,
+      insensitive: false,
+    };
+    const c: PredicateNode = {
+      kind: 'compare',
+      field: int8n(),
+      op: 'lt',
+      value: I8.zero,
+      insensitive: false,
+    };
     await assertAgrees({
       kind: 'not',
       child: {
@@ -333,8 +469,20 @@ describe('differential: nested boolean combinators', () => {
   });
 
   it('4-deep: AND(OR(NOT(AND(a,b)), c), NOT(isNull))', async () => {
-    const a: PredicateNode = { kind: 'compare', field: int8(), op: 'gt', value: I8.negOne, insensitive: false };
-    const b: PredicateNode = { kind: 'compare', field: text(), op: 'endsWith', value: TXT.a, insensitive: true };
+    const a: PredicateNode = {
+      kind: 'compare',
+      field: int8(),
+      op: 'gt',
+      value: I8.negOne,
+      insensitive: false,
+    };
+    const b: PredicateNode = {
+      kind: 'compare',
+      field: text(),
+      op: 'endsWith',
+      value: TXT.a,
+      insensitive: true,
+    };
     const c: PredicateNode = { kind: 'isNull', field: int8n(), negated: true };
     await assertAgrees({
       kind: 'and',
@@ -351,8 +499,17 @@ describe('differential: nested boolean combinators', () => {
   });
 
   it('deeply nested NOT chain (NOT NOT NOT unknown) over a NULL column stays unknown', async () => {
-    const base: PredicateNode = { kind: 'compare', field: int8n(), op: 'equals', value: I8.one, insensitive: false };
-    await assertAgrees({ kind: 'not', child: { kind: 'not', child: { kind: 'not', child: base } } });
+    const base: PredicateNode = {
+      kind: 'compare',
+      field: int8n(),
+      op: 'equals',
+      value: I8.one,
+      insensitive: false,
+    };
+    await assertAgrees({
+      kind: 'not',
+      child: { kind: 'not', child: { kind: 'not', child: base } },
+    });
   });
 });
 

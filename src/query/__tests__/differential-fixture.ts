@@ -1,14 +1,26 @@
-/**
- * Fixture for `differential.test.ts`. Not `*.test.ts` so vitest does not collect it, but kept
- * under `src/` so it stays inside `rootDir` for `tsc --noEmit`.
- */
 import type { Pool } from 'pg';
 import { PgCatalogSchemaProvider } from '../../schema/resolver.js';
 import type { ResolvedModel, StaticField, StaticSchema } from '../../schema/types.js';
 import { SCHEMA_FORMAT_VERSION } from '../../version.js';
-import { JSON_NULL, formatArrayLiteral, formatParamText, parseTimestampMicros } from '../compare.js';
+import {
+  JSON_NULL,
+  formatArrayLiteral,
+  formatParamText,
+  parseTimestampMicros,
+} from '../compare.js';
 
 export const TABLE = 'pgbase_differential_fixture';
+
+export const ENUM_TYPE = 'pgbase_differential_status';
+export const ENUM_NAME = 'FixtureStatus';
+export const ENUM_VALUES = ['QUEUED', 'RUNNING', 'DONE', 'FAILED'] as const;
+
+export const STATUS = {
+  queued: 'QUEUED',
+  running: 'RUNNING',
+  done: 'DONE',
+  failed: 'FAILED',
+};
 
 function tz(iso: string): bigint {
   return parseTimestampMicros(`${iso}Z`, true);
@@ -118,7 +130,12 @@ export const JS = {
   jsonNull: JSON_NULL,
 };
 
-const COLUMNS: readonly { name: string; ddlType: string; nullable: boolean }[] = [
+const COLUMNS: readonly {
+  name: string;
+  ddlType: string;
+  nullable: boolean;
+  enumName?: string;
+}[] = [
   { name: 'c_bool', ddlType: 'boolean', nullable: false },
   { name: 'c_bool_n', ddlType: 'boolean', nullable: true },
   { name: 'c_int4', ddlType: 'integer', nullable: false },
@@ -143,6 +160,9 @@ const COLUMNS: readonly { name: string; ddlType: string; nullable: boolean }[] =
   { name: 'c_arr_n', ddlType: 'text[]', nullable: true },
   { name: 'c_json', ddlType: 'jsonb', nullable: false },
   { name: 'c_json_n', ddlType: 'jsonb', nullable: true },
+  { name: 'c_enum', ddlType: `"${ENUM_TYPE}"`, nullable: false, enumName: ENUM_NAME },
+  { name: 'c_enum_n', ddlType: `"${ENUM_TYPE}"`, nullable: true, enumName: ENUM_NAME },
+  { name: 'c_enum_arr', ddlType: `"${ENUM_TYPE}"[]`, nullable: false, enumName: ENUM_NAME },
 ];
 
 const DEFAULTS: Record<string, unknown> = {
@@ -170,6 +190,9 @@ const DEFAULTS: Record<string, unknown> = {
   c_arr_n: ARR.ab,
   c_json: JS.a1,
   c_json_n: JS.a1,
+  c_enum: STATUS.queued,
+  c_enum_n: STATUS.queued,
+  c_enum_arr: [STATUS.queued, STATUS.running],
 };
 
 function row(id: number, overrides: Record<string, unknown>): Record<string, unknown> {
@@ -251,6 +274,16 @@ export const ROWS: readonly Record<string, unknown>[] = [
   // Pre-epoch: negative microsecond offsets, where floor-division must not round toward zero.
   row(59, { c_ts: TS.preEpoch, c_tstz: TSTZ.preEpoch, c_date: DATE.d0 }),
   row(60, { c_ts: TS.preEpochPlus1us, c_tstz: TSTZ.preEpochPlus1us }),
+  // Enum: every declared member on the scalar columns, including the RUNNING/FAILED pair whose
+  // declared order disagrees with text order.
+  row(61, { c_enum: STATUS.running }),
+  row(62, { c_enum: STATUS.failed }),
+  row(63, { c_enum: STATUS.done, c_enum_n: STATUS.failed }),
+  row(64, { c_enum: STATUS.running, c_enum_n: null }),
+  row(65, { c_enum_n: null }),
+  row(66, { c_enum_arr: [STATUS.running, STATUS.failed] }),
+  row(67, { c_enum_arr: [] as readonly string[] }),
+  row(68, { c_enum_arr: [STATUS.done] }),
 ];
 
 function buildStaticSchema(): StaticSchema {
@@ -269,27 +302,33 @@ function buildStaticSchema(): StaticSchema {
   };
   const fields: StaticField[] = [
     idField,
-    ...COLUMNS.map(
-      (c): StaticField => ({
-        name: c.name,
-        column: c.name,
-        type: 'Unknown',
-        nativeType: null,
-        enumName: null,
-        isList: c.ddlType.endsWith('[]'),
-        isRequired: !c.nullable,
-        isId: false,
-        isUnique: false,
-        isUpdatedAt: false,
-        isForeignKey: false,
-      }),
-    ),
+    ...COLUMNS.map((c): StaticField => ({
+      name: c.name,
+      column: c.name,
+      type: 'Unknown',
+      nativeType: null,
+      enumName: c.enumName ?? null,
+      isList: c.ddlType.endsWith('[]'),
+      isRequired: !c.nullable,
+      isId: false,
+      isUnique: false,
+      isUpdatedAt: false,
+      isForeignKey: false,
+    })),
   ];
   return {
     formatVersion: SCHEMA_FORMAT_VERSION,
-    enums: [],
+    enums: [{ name: ENUM_NAME, dbName: ENUM_TYPE, values: [...ENUM_VALUES] }],
     models: [
-      { model: 'Fixture', table: TABLE, namespace: 'public', fields, relations: [], primaryKey: ['id'], uniques: [] },
+      {
+        model: 'Fixture',
+        table: TABLE,
+        namespace: 'public',
+        fields,
+        relations: [],
+        primaryKey: ['id'],
+        uniques: [],
+      },
     ],
   };
 }
@@ -304,6 +343,10 @@ export async function createFixture(pool: Pool): Promise<void> {
     ',\n    ',
   );
   await pool.query(`DROP TABLE IF EXISTS "${TABLE}"`);
+  await pool.query(`DROP TYPE IF EXISTS "${ENUM_TYPE}" CASCADE`);
+  await pool.query(
+    `CREATE TYPE "${ENUM_TYPE}" AS ENUM (${ENUM_VALUES.map((v) => `'${v}'`).join(', ')})`,
+  );
   await pool.query(`
     CREATE TABLE "${TABLE}" (
       id integer PRIMARY KEY,
@@ -320,14 +363,21 @@ export async function createFixture(pool: Pool): Promise<void> {
       if (key === 'id') continue;
       const field = model.byColumn.get(key)!;
       assignments.push(`"${key}"`);
+      const isEnum = field.enumName !== null;
       if (value === null) {
         values.push('NULL');
       } else if (field.elementTypeOid !== null) {
-        const literal = formatArrayLiteral(field.elementTypeOid, value as readonly unknown[]);
-        values.push(`'${literal.replace(/'/g, "''")}'::${sqlArrayType(field.elementTypeOid)}[]`);
+        const literal = formatArrayLiteral(
+          field.elementTypeOid,
+          value as readonly unknown[],
+          isEnum,
+        );
+        const elemType = isEnum ? `"${field.elementTypeName}"` : sqlArrayType(field.elementTypeOid);
+        values.push(`'${literal.replace(/'/g, "''")}'::${elemType}[]`);
       } else {
-        const text = formatParamText(field.typeOid, value);
-        values.push(`'${text.replace(/'/g, "''")}'::${sqlScalarType(field.typeOid)}`);
+        const text = formatParamText(field.typeOid, value, isEnum);
+        const scalarType = isEnum ? `"${field.typeName}"` : sqlScalarType(field.typeOid);
+        values.push(`'${text.replace(/'/g, "''")}'::${scalarType}`);
       }
     }
     await pool.query(
@@ -339,6 +389,7 @@ export async function createFixture(pool: Pool): Promise<void> {
 
 export async function dropFixture(pool: Pool): Promise<void> {
   await pool.query(`DROP TABLE IF EXISTS "${TABLE}"`);
+  await pool.query(`DROP TYPE IF EXISTS "${ENUM_TYPE}" CASCADE`);
 }
 
 // Mirrors compare.ts's `sqlTypeName`, kept separate so the fixture's INSERT casts don't depend on

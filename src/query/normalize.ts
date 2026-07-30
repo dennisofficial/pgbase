@@ -256,7 +256,13 @@ function buildCompare(
   if (rawValue === null) {
     throw new QueryError(`Field "${field.name}": operator "${op}" does not accept null here.`);
   }
-  const value = coerceValue(field.typeOid, field.elementTypeOid, rawValue, field.name);
+  const value = coerceValue(
+    field.typeOid,
+    field.elementTypeOid,
+    rawValue,
+    field.name,
+    field.enumValues,
+  );
   return { kind: 'compare', field, op, value, insensitive };
 }
 
@@ -266,7 +272,7 @@ function buildSet(field: ResolvedField, op: 'in' | 'notIn', rawValues: unknown):
   const values = arr.map((v) => {
     if (v === null)
       throw new QueryError(`Field "${field.name}": "${op}" values cannot include null.`);
-    return coerceValue(field.typeOid, null, v, field.name);
+    return coerceValue(field.typeOid, null, v, field.name, field.enumValues);
   });
   return { kind: 'set', field, op, values };
 }
@@ -282,7 +288,7 @@ function buildList(
   const values = rawValues.map((v) => {
     if (v === null)
       throw new QueryError(`Field "${field.name}": "${op}" values cannot include null.`);
-    return coerceValue(field.elementTypeOid as number, null, v, field.name);
+    return coerceValue(field.elementTypeOid as number, null, v, field.name, field.enumValues);
   });
   return { kind: 'list', field, op, values };
 }

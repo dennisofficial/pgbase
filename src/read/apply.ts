@@ -7,7 +7,7 @@ export function applyPlan(plan: ResultPlan, result: unknown): unknown {
 }
 
 function applyRow(plan: ResultPlan, row: unknown): unknown {
-  const view = plan.transform(row);
+  const view = plan.project(row);
   if (view === null || typeof view !== 'object' || plan.relations.size === 0) return view;
 
   const raw = row as Record<string, unknown>;

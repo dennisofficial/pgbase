@@ -20,6 +20,6 @@
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
   },
-  "include": ["src", "prisma.config.ts"],
+  "include": ["src", "prisma.config.ts", "prisma/seed.ts"],
   "exclude": ["dist", "node_modules"],
 }

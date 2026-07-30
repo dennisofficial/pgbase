@@ -1,24 +1,18 @@
 import { Controller, Get } from '@nestjs/common';
-import { PrismaService } from './prisma/prisma.service';
+import { JobSummaryService } from './pgbase/job-summary.service';
 
 @Controller()
 export class AppController {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly jobSummary: JobSummaryService) {}
 
   @Get('health')
   health() {
     return { status: 'ok' };
   }
 
-  /**
-   * TEMPORARY — a hand-written read endpoint with no authorization, which is the exact failure
-   * mode pgbase exists to make impossible. It is here only to prove the Prisma wiring end to end,
-   * and is deleted once clients can query through the SDK.
-   *
-   * Mutation endpoints do not go away; only reads leave the controller.
-   */
-  @Get('jobs')
-  jobs() {
-    return this.prismaService.job.findMany({ take: 10 });
+  /** Demonstrates ScopedPrisma: an RLS-scoped read run server-side on behalf of the caller. */
+  @Get('jobs/high-priority-count')
+  highPriorityJobCount() {
+    return this.jobSummary.highPriorityJobCount();
   }
 }

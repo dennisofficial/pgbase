@@ -69,12 +69,16 @@ function compileCompare(
   values: string[],
 ): string {
   const { field, op, value, insensitive } = node;
+  const isEnum = field.enumName !== null;
 
   if (field.elementTypeOid !== null) {
     // The only compare op normalize() ever emits for an array field is whole-array equals/not.
-    const literal = formatArrayLiteral(field.elementTypeOid, value as readonly unknown[]);
+    const elemSqlType = isEnum
+      ? quoteIdent(field.elementTypeName!)
+      : sqlTypeName(field.elementTypeOid);
+    const literal = formatArrayLiteral(field.elementTypeOid, value as readonly unknown[], isEnum);
     const p = push(values, literal);
-    const right = `${p}::${sqlTypeName(field.elementTypeOid)}[]`;
+    const right = `${p}::${elemSqlType}[]`;
     return op === 'equals' ? `${col(field)} = ${right}` : `${col(field)} <> ${right}`;
   }
 
@@ -90,11 +94,13 @@ function compileCompare(
     return `${left} LIKE ${right} ESCAPE '\\'`;
   }
 
-  const sqlType = isJson ? 'jsonb' : sqlTypeName(oid);
+  // Enum columns get neither `COLLATE "C"` (Postgres rejects a collation on a non-collatable
+  // type) nor a builtin `sqlTypeName` — the cast target is the enum's own per-install type name.
+  const sqlType = isEnum ? quoteIdent(field.typeName) : isJson ? 'jsonb' : sqlTypeName(oid);
   const columnExpr = isJson ? `${col(field)}::jsonb` : col(field);
 
   if (op === 'equals' || op === 'not') {
-    const p = push(values, formatParamText(oid, value));
+    const p = push(values, formatParamText(oid, value, isEnum));
     let left = columnExpr;
     let right = `${p}::${sqlType}`;
     if (isText) {
@@ -106,7 +112,7 @@ function compileCompare(
 
   // lt / lte / gt / gte
   const opSql = { lt: '<', lte: '<=', gt: '>', gte: '>=' }[op];
-  const p = push(values, formatParamText(oid, value));
+  const p = push(values, formatParamText(oid, value, isEnum));
   let left = col(field);
   let right = `${p}::${sqlType}`;
   if (isText) {
@@ -119,12 +125,12 @@ function compileCompare(
 function compileSet(node: Extract<PredicateNode, { kind: 'set' }>, values: string[]): string {
   const { field, op, values: vals } = node;
   const oid = field.typeOid;
+  const isEnum = field.enumName !== null;
   const isText = isTextOid(oid);
-  const p = push(values, formatArrayLiteral(oid, vals));
+  const sqlType = isEnum ? quoteIdent(field.typeName) : sqlTypeName(oid);
+  const p = push(values, formatArrayLiteral(oid, vals, isEnum));
   const colExpr = isText ? `${col(field)} COLLATE "C"` : col(field);
-  const arrExpr = isText
-    ? `${p}::${sqlTypeName(oid)}[] COLLATE "C"`
-    : `${p}::${sqlTypeName(oid)}[]`;
+  const arrExpr = isText ? `${p}::${sqlType}[] COLLATE "C"` : `${p}::${sqlType}[]`;
   const membership = `${colExpr} = ANY(${arrExpr})`;
   return op === 'in' ? membership : `(NOT ${membership})`;
 }
@@ -132,23 +138,22 @@ function compileSet(node: Extract<PredicateNode, { kind: 'set' }>, values: strin
 function compileList(node: Extract<PredicateNode, { kind: 'list' }>, values: string[]): string {
   const { field, op } = node;
   const elemOid = field.elementTypeOid as number;
-  const sqlType = sqlTypeName(elemOid);
+  const isEnum = field.enumName !== null;
+  const sqlType = isEnum ? quoteIdent(field.elementTypeName!) : sqlTypeName(elemOid);
   const isText = isTextOid(elemOid);
   const colExpr = isText ? `${col(field)} COLLATE "C"` : col(field);
 
   if (op === 'isEmpty') {
-    // `array_length(NULL, 1) IS NULL` is also true, which would conflate "column is NULL" with
-    // "array is empty". Force the NULL-column case back to SQL NULL (unknown) explicitly.
     return `(CASE WHEN ${col(field)} IS NULL THEN NULL ELSE array_length(${col(field)}, 1) IS NULL END)`;
   }
 
   if (op === 'has') {
-    const p = push(values, formatParamText(elemOid, node.values[0]));
+    const p = push(values, formatParamText(elemOid, node.values[0], isEnum));
     const pExpr = isText ? `${p}::${sqlType} COLLATE "C"` : `${p}::${sqlType}`;
     return `${pExpr} = ANY(${colExpr})`;
   }
 
-  const p = push(values, formatArrayLiteral(elemOid, node.values));
+  const p = push(values, formatArrayLiteral(elemOid, node.values, isEnum));
   const arrExpr = isText ? `${p}::${sqlType}[] COLLATE "C"` : `${p}::${sqlType}[]`;
   return op === 'hasSome' ? `${colExpr} && ${arrExpr}` : `${colExpr} @> ${arrExpr}`;
 }

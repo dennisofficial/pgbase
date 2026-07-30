@@ -1,24 +1,17 @@
 import type { ResolvedModel, ResolvedSchema } from '../schema/types.js';
 import { PolicyValidationError } from './errors.js';
-import { probe as defaultProbe } from './sentinel.js';
+import { computeFilterable } from './filterable.js';
 import { NO_CLIENT_ACCESS, type Policy, type PolicyEntry, type ProbeResult } from './types.js';
 
 export interface ValidatedPolicy {
-  readonly policy: Policy;
+  readonly policy: Policy<any, any, any>;
   readonly probeResult: ProbeResult;
-}
-
-export interface ValidatePoliciesOptions {
-  readonly probe?: (model: ResolvedModel, transform: (row: never) => unknown) => ProbeResult;
 }
 
 export function validatePolicies(
   schema: ResolvedSchema,
   registry: Readonly<Record<string, PolicyEntry<any, any, any>>>,
-  options: ValidatePoliciesOptions = {},
 ): ReadonlyMap<string, ValidatedPolicy> {
-  const probeFn = options.probe ?? defaultProbe;
-
   const modelNames = new Set(schema.models.map((m) => m.model));
   const registryNames = new Set(Object.keys(registry));
 
@@ -44,14 +37,12 @@ export function validatePolicies(
     if (entry === NO_CLIENT_ACCESS) continue;
 
     const policy = entry;
-    const probeResult = probeFn(model, policy.transform as (row: never) => unknown);
+    const probeResult = computeFilterable(model, policy);
 
-    const anyExposed = [...probeResult.exposure.values()].some((e) => e !== 'absent');
-    if (!anyExposed) {
+    if (probeResult.filterable.size === 0) {
       throw new PolicyValidationError(
-        `Model "${model.model}": transform's output exposes no columns at all — every column ` +
-          `probed "absent". Almost certainly a mistake: either the transform returns an empty ` +
-          `object, or it never reads any column off its own row.`,
+        `Model "${model.model}": "omit" hides every column on this model — nothing is exposed. ` +
+          `Almost certainly a mistake; NO_CLIENT_ACCESS says the same thing without a policy.`,
       );
     }
 
@@ -79,7 +70,7 @@ function checkReplicaIdentity(model: ResolvedModel, probeResult: ProbeResult): v
       `part of its primary key, but the table is not REPLICA IDENTITY FULL. Without FULL, an ` +
       `UPDATE's old tuple carries only the key, so the leader cannot tell whether a row left a ` +
       `subscription's filter — the row would go stale on clients instead of being removed. Run ` +
-      `ALTER TABLE ... REPLICA IDENTITY FULL, or narrow the transform so it exposes only ` +
-      `primary-key columns.`,
+      `ALTER TABLE ... REPLICA IDENTITY FULL, or omit those columns so only primary-key columns ` +
+      `remain visible.`,
   );
 }

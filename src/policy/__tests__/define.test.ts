@@ -6,23 +6,24 @@ interface Job {
   readonly id: string;
   readonly name: string;
 }
-interface JobView {
-  readonly id: string;
-}
 interface Claims {
   readonly orgIds: readonly string[];
 }
 
 describe('definePolicy', () => {
-  it('returns a Policy carrying model/transform/rls through unchanged', () => {
-    const transform = (row: Job): JobView => ({ id: row.id });
+  it('returns a Policy carrying model/omit/rls through unchanged', () => {
     const rls = (claims: Claims) => ({ orgId: { in: [...claims.orgIds] } });
 
-    const policy = definePolicy('Job', { transform, rls });
+    const policy = definePolicy<Job, Claims>('Job')({ omit: ['name'], rls });
 
     expect(policy.model).toBe('Job');
-    expect(policy.transform).toBe(transform);
+    expect(policy.omit).toEqual(['name']);
     expect(policy.rls).toBe(rls);
+  });
+
+  it('omit defaults to empty when not supplied', () => {
+    const policy = definePolicy<Job, Claims>('Job')({ rls: () => ({}) });
+    expect(policy.omit).toEqual([]);
   });
 });
 
@@ -30,9 +31,9 @@ describe('definePolicy', () => {
 // the shape a consumer supplies.
 type ModelName = 'Job' | 'JobSettings' | 'AuditLog';
 
-const jobPolicy = definePolicy('Job', {
-  transform: (row: Job): JobView => ({ id: row.id }),
-  rls: (claims: Claims) => ({ orgId: { in: [...claims.orgIds] } }),
+const jobPolicy = definePolicy<Job, Claims>('Job')({
+  omit: ['name'],
+  rls: (claims) => ({ orgId: { in: [...claims.orgIds] } }),
 });
 
 describe('PolicyRegistry — exhaustiveness is a compile-time property', () => {
