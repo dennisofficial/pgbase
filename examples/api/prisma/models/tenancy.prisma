@@ -1,5 +1,5 @@
-// Tenancy. `orgId` is the routing column for almost every subscription (docs/DESIGN.md §6),
-// and the argument of every RLS read policy.
+// Tenancy. `orgId` is the routing column for almost every subscription, and the argument of
+// every RLS read policy.
 
 model Org {
   id        String       @id @default(uuid()) @db.Uuid
@@ -18,10 +18,9 @@ model Org {
 
 model User {
   id        String       @id @default(uuid()) @db.Uuid
-  /// Deliberately NOT citext. Equality is case-sensitive in both JS and PG here; under citext PG
-  /// would compare case-insensitively while JS would not, and the snapshot would disagree with
-  /// the live matcher forever. §4.2 bans citext from filterable columns for exactly this reason —
-  /// this column is here to prove the non-citext path stays consistent.
+  /// Deliberately NOT citext. Under citext, PG would compare case-insensitively while JS would
+  /// not, and the snapshot would disagree with the live matcher forever. Filterable columns may
+  /// not be citext; this proves the non-citext path stays consistent.
   email     String       @unique
   name      String?
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -33,9 +32,8 @@ model User {
   @@map("users")
 }
 
-/// Composite primary key where both halves are foreign keys. The registry must surface
-/// `primaryKey.fields` for this — §7.5 rejects no-PK tables at boot, and a composite PK that
-/// reads as "no PK" would take this table out of the WAL pipeline silently.
+/// Composite primary key where both halves are foreign keys. A composite key that resolved to
+/// "no PK" would silently drop this table out of the WAL pipeline instead of failing.
 model Membership {
   orgId  String     @map("org_id") @db.Uuid
   userId String     @map("user_id") @db.Uuid

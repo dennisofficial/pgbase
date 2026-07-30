@@ -11,20 +11,11 @@ export class AppController {
   }
 
   /**
-   * TEMPORARY — and it is the exact thing pgbase exists to delete.
+   * TEMPORARY — a hand-written read endpoint with no authorization, which is the exact failure
+   * mode pgbase exists to make impossible. It is here only to prove the Prisma wiring end to end,
+   * and is deleted once clients can query through the SDK.
    *
-   * docs/DESIGN.md §1: "The backend writes NO read endpoints." Under CQS a client wanting jobs
-   * subscribes through the SDK inside an RLS envelope it cannot influence; it does not call a
-   * hand-written GET with no policy attached. This route has no authorization whatsoever, which
-   * is precisely the failure mode the package is designed to make impossible.
-   *
-   * It exists for one reason: to prove the Prisma wiring end to end before any of pgbase is
-   * implemented. **Phase 5 deletes it** — when the Tier 1 one-shot path lands, this is the
-   * "before" side of the comparison and the first thing to go.
-   *
-   * What does NOT go away: mutation endpoints. CQS removes reads from the controller, not writes
-   * — commands stay imperative NestJS services. This controller keeps existing; it just stops
-   * having GETs that return rows.
+   * Mutation endpoints do not go away; only reads leave the controller.
    */
   @Get('jobs')
   jobs() {

@@ -1,8 +1,8 @@
 // Deliberately has NO tenant column.
 //
-// §6 says the routing key is "the highest-selectivity equality column present in nearly every
-// subscription for that table", NOT "the tenant column" — rs-crm has no tenancy at all. This
-// model is what proves the wildcard bucket works when no such column exists, and it is the one
+// The subscription router keys on the highest-selectivity equality column present in nearly every
+// subscription for a table, which is not always a tenant column — some schemas have no tenancy at
+// all. This model proves the wildcard bucket works when no such column exists, and it is the one
 // table where every subscription must be tested on every change.
 
 model AuditLog {

@@ -1,6 +1,6 @@
-// Numeric edge cases. Both `Decimal` and `BigInt` arrive as STRINGS from node-postgres and from
-// pgoutput; comparing them with a bare `<` in JS is wrong at the edges. This model is what the
-// per-type comparators of divergence hazard #1 are proved against.
+// Numeric edge cases. Decimal and BigInt both arrive as strings from node-postgres and from
+// pgoutput, so comparing them with a bare `<` in JS is wrong at the edges. This model is what the
+// per-type comparators are proved against.
 
 model Invoice {
   id          String   @id @default(uuid()) @db.Uuid

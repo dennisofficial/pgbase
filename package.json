@@ -1,6 +1,6 @@
 {
   "name": "@workspace/pgbase",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Self-hosted Postgres BaaS for NestJS + Prisma: RLS-guarded live queries over a typed client SDK (CQS)",
   "license": "MIT",
   "author": "Dennis Lysenko",
@@ -47,6 +47,16 @@
         "types": "./src/react/index.ts",
         "default": "./dist/react/index.js"
       }
+    },
+    "./schema": {
+      "import": {
+        "types": "./src/schema/index.ts",
+        "default": "./dist/schema/index.mjs"
+      },
+      "require": {
+        "types": "./src/schema/index.ts",
+        "default": "./dist/schema/index.js"
+      }
     }
   },
   "files": [
@@ -65,7 +75,11 @@
     "example:api": "pnpm --filter @pgbase-example/api dev",
     "example:web": "pnpm --filter @pgbase-example/web dev"
   },
+  "bin": {
+    "pgbase": "./dist/generator/bin.js"
+  },
   "dependencies": {
+    "@prisma/generator-helper": "^7.9.1",
     "pg": "^8.13.1",
     "pg-types": "^4.0.2"
   },

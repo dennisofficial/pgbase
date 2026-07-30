@@ -6,13 +6,13 @@ model Job {
   name      String
   status    JobStatus    @default(QUEUED)
   priority  Int          @default(0)
-  /// Scalar list — a real Postgres text[]. `has` / `hasSome` must agree between the compiled SQL
-  /// and the in-memory evaluator.
+  /// A real Postgres text[]. `has` / `hasSome` must agree between the compiled SQL and the
+  /// in-memory evaluator.
   labels    String[]     @default([])
   /// jsonb with a PLAIN LITERAL default. Function defaults re-emit on every migrate; never use one.
   metadata  Json         @default("{}")
   /// Nullable on purpose: `status != 'DONE'` must not include these rows in JS while excluding
-  /// them in SQL (divergence hazard #3 — the NULL-lifting rewrite is what fixes it).
+  /// them in SQL. The NULL-lifting rewrite is what keeps the two interpreters agreeing.
   closedAt  DateTime?    @map("closed_at") @db.Timestamptz(6)
   createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -21,8 +21,8 @@ model Job {
   settings  JobSettings?
   tasks     Task[]
   watchers  JobWatcher[]
-  /// Implicit m2m. Prisma hides the join table (`_JobToTag`) from the DMMF entirely, so its
-  /// physical shape has to come from pg_catalog (§14.8).
+  /// Implicit m2m. Prisma hides the join table (`_JobToTag`) from every DMMF variant, so its
+  /// physical shape has to come from pg_catalog.
   tags      Tag[]
 
   @@index([orgId, status])
@@ -44,9 +44,9 @@ enum JobStatus {
 model JobSettings {
   jobId         String @id @map("job_id") @db.Uuid
   concurrency   Int    @default(1)
-  /// Must NEVER appear in a transform output, so the sentinel probe (§2) can prove a non-view
-  /// column is neither returned NOR filterable. If `webhookSecret` is ever filterable, the
-  /// `{ startsWith: 'a' }` oracle extracts it one character at a time.
+  /// Must never appear in a transform output. The boot probe proves a non-view column is neither
+  /// returned nor filterable — if this one were filterable, a `{ startsWith: 'a' }` oracle would
+  /// extract it one character at a time.
   webhookSecret String @map("webhook_secret")
 
   job           Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -60,8 +60,8 @@ model Task {
   jobId     String   @map("job_id") @db.Uuid
   title     String
   done      Boolean  @default(false)
-  /// Array-of-ids stored as jsonb rather than a Postgres array — Atlas does this today, so the
-  /// registry must not assume `Json` always means an object.
+  /// Array-of-ids stored as jsonb rather than a Postgres array, so the registry must not assume
+  /// `Json` always means an object.
   blockedBy Json     @default("[]") @map("blocked_by")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -72,7 +72,7 @@ model Task {
 }
 
 /// Explicit m2m through a join model, as opposed to Job<->Tag's implicit one. Both shapes must
-/// resolve, because Tier 1 `include` has to traverse either.
+/// resolve, because a one-shot `include` has to traverse either.
 model JobWatcher {
   jobId    String    @map("job_id") @db.Uuid
   userId   String    @map("user_id") @db.Uuid

@@ -1179,6 +1179,59 @@ Runtime then imports a plain generated module. Consequences, all good:
 Cost: consumers add a generator block to `schema.prisma` and re-run `prisma generate` on schema
 change. That is ordinary Prisma workflow.
 
+### The generator emits DATA ONLY — never types
+
+The obvious objection is *"why generate anything? the consumer already ran `prisma generate`."*
+Answered by separating two needs that are easy to conflate:
+
+| Need | Source |
+|---|---|
+| **Types** — `Prisma.ModelName`, model row shapes, `$Enums`, the basis for `LiveWhere<M>` and view-field narrowing | **the consumer's own generated client.** pgbase generates none of this and must never duplicate it. |
+| **Runtime data** — the physical name mapping | **our generator.** Nothing else can supply it. |
+
+The second row is not a preference. **Logical decoding hands the leader `jobs` and `created_at`;
+it never says `Job` or `createdAt`.** Connecting a WAL event to a model, a policy, or a transform
+requires that mapping *as runtime data*, and TypeScript types are erased. `@@map` is arbitrary so
+convention cannot recover it, and `pg_catalog` knows the physical side but has never heard of a
+Prisma model name.
+
+And the mapping is genuinely absent from what the consumer already has — measured 2026-07-30
+against the `prisma-client` generator's output:
+
+```
+runtimeDataModel        →  { "models": {}, "enums": {}, "types": {} }     ← emptied
+parameterizationSchema  →  28 bytes, empty
+inlineSchema            →  the whole merged schema, as unparsed PSL TEXT
+```
+
+`inlineSchema` does carry every `@@map`/`@map`/`@db.*`, but extracting them means either writing a
+PSL parser or handing the text back to `getDMMF()` — which is the internal, WASM-laden route this
+section already rejected.
+
+⇒ **The generated artifact is one module default-exporting a `StaticSchema` literal.** No types, no
+client, no query surface.
+
+**It is gitignored, not committed.** An earlier draft of this section said the opposite; that was
+wrong. The consumer already runs `prisma generate` and already gitignores `generated/prisma/`, so
+emitting beside it means the consumer manages *zero* extra files rather than two. Committing bought
+nothing — deployment already depends on `prisma generate` for the client itself.
+
+### Why not skip the generator and parse `inlineSchema` at boot?
+
+The generated client embeds the whole merged schema as text under `inlineSchema`, so in principle
+pgbase could read and parse it at boot and emit no file at all. Rejected on two grounds:
+
+1. **It lives in `internal/class.ts`, which Prisma banner-marks *"🛑 Under no circumstances should
+   you import this file directly!"*** — a worse stability bet than the public generator API.
+2. **It would make us the owners of a PSL parser.** Prisma's grammar moves (multi-file schemas and
+   `moduleFormat` both landed recently); a parser that silently mis-maps one `@map` is a data-
+   correctness bug in the tenant-isolation path. Using Prisma's own parse via the official
+   generator interface is correct by construction.
+
+Measured 2026-07-30: the field→column translation the client itself uses lives inside
+`query_compiler_fast_bg.postgresql.wasm`, fed from `inlineSchema`. It is not exposed as data
+anywhere — which is why this mapping has to be captured at generate time or not at all.
+
 Unchanged from §14.6: **physical `pg_type` OIDs still come from `pg_catalog` at boot**, not from
 the DMMF. Newly known: the **implicit many-to-many join table** (`_BookToAuthor`) appears in no
 DMMF variant at all — it is a schema-level concept Prisma hides — so its physical shape must also
