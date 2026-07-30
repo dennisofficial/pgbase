@@ -97,6 +97,16 @@
         "types": "./src/read/index.ts",
         "default": "./dist/read/index.js"
       }
+    },
+    "./wal": {
+      "import": {
+        "types": "./src/wal/index.ts",
+        "default": "./dist/wal/index.mjs"
+      },
+      "require": {
+        "types": "./src/wal/index.ts",
+        "default": "./dist/wal/index.js"
+      }
     }
   },
   "files": [
@@ -121,6 +131,7 @@
   "dependencies": {
     "@prisma/generator-helper": "^7.9.1",
     "pg": "^8.13.1",
+    "pg-logical-replication": "^2.5.0",
     "pg-types": "^4.0.2",
     "superjson": "^2.2.6"
   },

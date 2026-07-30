@@ -14,8 +14,6 @@ export interface RequestContext<Principal = unknown, Claims = unknown> {
 export interface ContextStore<Principal = unknown, Claims = unknown> {
   run<T>(ctx: RequestContext<Principal, Claims>, fn: () => T): T;
   get(): RequestContext<Principal, Claims> | undefined;
-  runUnscoped<T>(reason: string, fn: () => T): T;
-  isUnscoped(): boolean;
 }
 
 export interface ClaimsCacheStats {

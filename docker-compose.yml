@@ -28,6 +28,17 @@ services:
       # STREAM_* messages yet (§14.7), but the server side costs nothing to enable now.
       - -c
       - logical_decoding_work_mem=64MB
+      # Failover latency after a leader is SIGKILLed. Postgres keeps the slot bound to the dead
+      # walsender until this expires and no standby can attach before then; the 60s default is a
+      # minute-long live-update blackout. A graceful SIGTERM releases the slot and never waits.
+      - -c
+      - wal_sender_timeout=10s
+      # A slot pins every WAL segment after its confirmed_flush_lsn. Uncapped, one leader that
+      # stops acknowledging — crashed, or orphaned by a deploy — fills the disk and takes the whole
+      # database down. At the cap Postgres invalidates the slot instead; the leader detects that,
+      # recreates it, and emits a resync. Lose the subscription, never the database.
+      - -c
+      - max_slot_wal_keep_size=2GB
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U pgbase -d pgbase']
       interval: 2s
@@ -63,6 +74,12 @@ services:
       - synchronous_commit=off
       - -c
       - full_page_writes=off
+      - -c
+      - wal_sender_timeout=10s
+      # Data lives in tmpfs here, so a slot left behind by a crashed test pins WAL in RAM, not on
+      # disk. Capped tighter than dev for that reason.
+      - -c
+      - max_slot_wal_keep_size=512MB
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U pgbase -d pgbase_test']
       interval: 2s

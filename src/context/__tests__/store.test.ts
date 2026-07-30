@@ -14,17 +14,15 @@ function ctx(userId: string, orgId: string) {
 }
 
 describe('AsyncLocalStorageContextStore', () => {
-  it('get() is undefined and isUnscoped() is false outside any scope', () => {
+  it('get() is undefined outside any scope', () => {
     const store = new AsyncLocalStorageContextStore<Principal, Claims>();
     expect(store.get()).toBeUndefined();
-    expect(store.isUnscoped()).toBe(false);
   });
 
   it('run() establishes scope for the duration of the callback only', () => {
     const store = new AsyncLocalStorageContextStore<Principal, Claims>();
     store.run(ctx('u1', 'o1'), () => {
       expect(store.get()).toEqual(ctx('u1', 'o1'));
-      expect(store.isUnscoped()).toBe(false);
     });
     expect(store.get()).toBeUndefined();
   });
@@ -36,31 +34,6 @@ describe('AsyncLocalStorageContextStore', () => {
         expect(store.get()).toEqual(ctx('inner', 'o2'));
       });
       expect(store.get()).toEqual(ctx('outer', 'o1'));
-    });
-  });
-
-  it('run() inside runUnscoped(): re-scoping is allowed', () => {
-    const store = new AsyncLocalStorageContextStore<Principal, Claims>();
-    store.runUnscoped('background job', () => {
-      expect(store.isUnscoped()).toBe(true);
-      store.run(ctx('u1', 'o1'), () => {
-        expect(store.isUnscoped()).toBe(false);
-        expect(store.get()).toEqual(ctx('u1', 'o1'));
-      });
-      expect(store.isUnscoped()).toBe(true);
-      expect(store.get()).toBeUndefined();
-    });
-  });
-
-  it('runUnscoped() inside run(): allowed, and does not leak back out', () => {
-    const store = new AsyncLocalStorageContextStore<Principal, Claims>();
-    store.run(ctx('u1', 'o1'), () => {
-      store.runUnscoped('one-off maintenance read', () => {
-        expect(store.isUnscoped()).toBe(true);
-        expect(store.get()).toBeUndefined();
-      });
-      expect(store.isUnscoped()).toBe(false);
-      expect(store.get()).toEqual(ctx('u1', 'o1'));
     });
   });
 
@@ -101,9 +74,10 @@ describe('AsyncLocalStorageContextStore', () => {
 });
 
 describe('requireContext', () => {
-  it('throws outside any scope, naming the opt-out', () => {
+  it('throws outside any scope, pointing at the direct-PrismaClient answer', () => {
     const store = new AsyncLocalStorageContextStore<Principal, Claims>();
-    expect(() => requireContext(store)).toThrow(/runUnscoped/);
+    expect(() => requireContext(store)).toThrow(/No pgbase request context/);
+    expect(() => requireContext(store)).toThrow(/PrismaClient directly/);
   });
 
   it('returns the established context inside run()', () => {
@@ -113,10 +87,9 @@ describe('requireContext', () => {
     });
   });
 
-  it('still throws inside runUnscoped() — that is the whole point of the opt-out', () => {
+  it('throws again once run() has returned — scope does not outlive the request', () => {
     const store = new AsyncLocalStorageContextStore<Principal, Claims>();
-    store.runUnscoped('cron', () => {
-      expect(() => requireContext(store)).toThrow(/runUnscoped/);
-    });
+    store.run(ctx('u1', 'o1'), () => requireContext(store));
+    expect(() => requireContext(store)).toThrow(/No pgbase request context/);
   });
 });

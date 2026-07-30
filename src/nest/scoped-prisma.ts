@@ -1,11 +1,10 @@
 import { Inject, Injectable, type Provider } from '@nestjs/common';
-import type { ContextStore } from '../context/index.js';
 import type { PolicyEntry, ViewOf } from '../policy/index.js';
 import type { ReadArgs } from '../read/index.js';
 import { PgbaseReadService } from './read-service.js';
 import type { Resolved } from './tokens.js';
-import { PGBASE_CONTEXT_STORE, PGBASE_OPTIONS, PGBASE_RESOLVED, delegateName } from './tokens.js';
-import type { PgbaseModuleOptions, PgbasePrismaClient } from './types.js';
+import { PGBASE_RESOLVED, delegateName } from './tokens.js';
+import type { PgbasePrismaClient } from './types.js';
 
 type FindManyDelegate = { findMany(args?: any): Promise<any> };
 
@@ -33,10 +32,7 @@ export type ScopedPrismaService<
     string,
     PolicyEntry<any, any, any>
   >,
-> = ScopedPrisma<Client, Registry> & {
-  /** Escape hatch for genuinely unscoped server work — bypasses RLS/policy scoping entirely. */
-  runUnscoped<T>(reason: string, fn: (prisma: Client) => Promise<T>): Promise<T>;
-};
+> = ScopedPrisma<Client, Registry>;
 
 export type ScopedPrismaTokenClass<
   Client extends PgbasePrismaClient,
@@ -55,8 +51,6 @@ class ScopedPrismaFactory {
   constructor(
     private readonly reads: PgbaseReadService,
     @Inject(PGBASE_RESOLVED) private readonly resolved: Resolved,
-    @Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions,
-    @Inject(PGBASE_CONTEXT_STORE) private readonly contextStore: ContextStore,
   ) {}
 
   create<
@@ -67,22 +61,20 @@ class ScopedPrismaFactory {
       this.resolved.schema.models.map((m) => [delegateName(m.model), m.model] as const),
     );
 
-    const base = {
-      runUnscoped: <T>(reason: string, fn: (prisma: PgbasePrismaClient) => Promise<T>) =>
-        this.contextStore.runUnscoped(reason, () => fn(this.options.prisma)),
-    };
-
-    // A Proxy can never be statically shown to carry the mapped delegates; this is the one cast,
-    // and `createScopedPrismaProvider` checks it against the token's declared instance type.
-    return new Proxy(base, {
-      get: (target, prop, receiver) => {
-        if (typeof prop === 'string' && prop in target) return Reflect.get(target, prop, receiver);
-        if (typeof prop !== 'string') return undefined;
-        const model = modelByDelegate.get(prop);
-        if (!model) return undefined;
-        return { findMany: (args: ReadArgs = {}) => this.reads.read(model, args) };
+    return new Proxy(
+      {},
+      {
+        get: (target, prop, receiver) => {
+          if (typeof prop === 'string' && prop in target) {
+            return Reflect.get(target, prop, receiver);
+          }
+          if (typeof prop !== 'string') return undefined;
+          const model = modelByDelegate.get(prop);
+          if (!model) return undefined;
+          return { findMany: (args: ReadArgs = {}) => this.reads.read(model, args) };
+        },
       },
-    }) as unknown as ScopedPrismaService<Client, Registry>;
+    ) as unknown as ScopedPrismaService<Client, Registry>;
   }
 }
 
