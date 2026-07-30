@@ -1,9 +1,9 @@
 import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { SCHEMA_FORMAT_VERSION } from '../version.js';
-import { PgCatalogSchemaProvider } from './resolver.js';
-import { createTestPool } from './test-support.js';
-import type { StaticModel, StaticSchema } from './types.js';
+import { SCHEMA_FORMAT_VERSION } from '../../version.js';
+import { PgCatalogSchemaProvider } from '../resolver.js';
+import { createTestPool } from '../test-support.js';
+import type { StaticModel, StaticSchema } from '../types.js';
 
 // Well-known, stable Postgres built-in OIDs (pg_type is an initial catalog; these never change).
 const OID_TEXT = 25;

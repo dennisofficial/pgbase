@@ -48,6 +48,16 @@
         "default": "./dist/react/index.js"
       }
     },
+    "./query": {
+      "import": {
+        "types": "./src/query/index.ts",
+        "default": "./dist/query/index.mjs"
+      },
+      "require": {
+        "types": "./src/query/index.ts",
+        "default": "./dist/query/index.js"
+      }
+    },
     "./schema": {
       "import": {
         "types": "./src/schema/index.ts",

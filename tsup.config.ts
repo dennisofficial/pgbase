@@ -14,14 +14,12 @@ const external = [
 ];
 
 export default defineConfig({
-  // One entry per public subpath. Keep in sync with package.json "exports". `generator/bin` is
-  // not a subpath export — it is a CLI entry, resolved via package.json "bin" and spawned by
-  // `prisma generate`, never `import`ed by a consumer.
   entry: [
     'src/index.ts',
     'src/nest/index.ts',
     'src/client/index.ts',
     'src/react/index.ts',
+    'src/query/index.ts',
     'src/schema/index.ts',
     'src/generator/bin.ts',
   ],
