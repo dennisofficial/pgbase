@@ -15,7 +15,6 @@ export function runGenerator(): void {
       return {
         prettyName: 'pgbase schema',
         defaultOutput: DEFAULT_OUTPUT,
-        // Cosmetic — Prisma prints this during `prisma generate`.
         version: `schema format v${SCHEMA_FORMAT_VERSION}`,
         requiresGenerators: [],
       };
