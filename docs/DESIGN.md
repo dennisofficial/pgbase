@@ -42,14 +42,14 @@ Convex's position (https://stack.convex.dev/why-convex-doesnt-need-row-level-sec
 
 Two legs, one of which reaches us:
 
-- *"The rules language is separate from application code"* — doesn't apply. `@Rls` is
+- _"The rules language is separate from application code"_ — doesn't apply. `@Rls` is
   TypeScript, on the entity, type-checked against `Claims`.
-- *"The client can't be trusted with the filter"* — partially applies. The client picks its own
+- _"The client can't be trusted with the filter"_ — partially applies. The client picks its own
   filter; it is ANDed with a server-derived predicate it cannot influence.
 
 **The residual risk is registry completeness**, and it is the thing this design must engineer
 against: a missing policy, a column that shouldn't be queryable, a traversal that reads a table
-whose policy never ran. Every one of those must fail closed *and loudly*, never silently.
+whose policy never ran. Every one of those must fail closed _and loudly_, never silently.
 
 ---
 
@@ -70,23 +70,25 @@ Two decorators. No `@Expose`, no `@Realtime`, no `@Queryable`.
 @Rls<Job, Claims>({
   read: (claims) => ({ orgId: { $in: claims.orgIds } }),
   update: (claims) => ({ orgId: { $in: claims.ownerOrgIds } }),
-  create: false,   // server-side unscoped only
+  create: false, // server-side unscoped only
   delete: false,
 })
-export class Job { /* columns */ }
+export class Job {
+  /* columns */
+}
 ```
 
 ### Secure by default, three ways
 
-| Missing | Consequence |
-|---|---|
-| `@Rls` | **deny all client access.** Not "allow" — absent policy is a closed door. |
-| `@RlsTransform` | **not queryable at all.** No transform ⇒ no wire shape ⇒ no exposure. |
-| column absent from transform output | never returned, **and never filterable** (§4.3) |
+| Missing                             | Consequence                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| `@Rls`                              | **deny all client access.** Not "allow" — absent policy is a closed door. |
+| `@RlsTransform`                     | **not queryable at all.** No transform ⇒ no wire shape ⇒ no exposure.     |
+| column absent from transform output | never returned, **and never filterable** (§4.3)                           |
 
 **Silent deny is still a failure mode.** An empty result set looks like "no data," not
 "misconfigured," and that's how a whole afternoon disappears. So: deny at runtime with a
-*named* error (`no @Rls policy on Job — all client access denied`), plus a boot-time log
+_named_ error (`no @Rls policy on Job — all client access denied`), plus a boot-time log
 enumerating every entity without a policy or transform.
 
 ### `@RlsTransform` replaces `@Expose`, and does more
@@ -95,19 +97,20 @@ The transform is the schema contract. Consequences:
 
 1. **The client type is `ReturnType<typeof transform>`.** No codegen step, no `.d.ts`
    generation, no staleness check — which is where Supabase's otherwise-good codegen story
-   leaks (*"there is no runtime schema check"*, their advice is a scheduled GitHub Action).
+   leaks (_"there is no runtime schema check"_, their advice is a scheduled GitHub Action).
 2. **Derived fields work.** `isStale`, `fullName`, `deriveHealth()`. A column allowlist can't
    express these, and all three surveyed codebases compute them (cubix's `mapRow` /
    `toPanelServerResponse` / `deriveHealth()`, rs-crm's mappers).
-3. **Patches are computed by diffing transform *outputs***, not raw columns: run the transform
+3. **Patches are computed by diffing transform _outputs_**, not raw columns: run the transform
    on `oldRow` and `newRow`, diff the two view objects, emit changed view fields. Correct even
    for conditional transforms, which a column-intersection approach gets wrong.
 
 Constraints the transform must obey, validated where possible:
+
 - **Pure and deterministic.** `Date.now()` or `Math.random()` inside a transform makes every
-  change look like a change. (Convex hits the same problem from the query side: *"using
+  change look like a change. (Convex hits the same problem from the query side: _"using
   `Date.now()` in a query can cause the Convex query cache to be invalidated more frequently
-  than necessary."*)
+  than necessary."_)
 - **Own columns only.** No relation access — the WAL row is one table.
 
 ### The sentinel probe
@@ -126,7 +129,7 @@ Yields two artifacts from one pass:
    shows up (safe), one that never appears is hard-blocked (also safe).
 2. **The column → view-field map**, for routing and for the publication column list (§7.3).
 
-**This closes a real leak.** Without it, dropping `@Expose` means nothing constrains *filtering*.
+**This closes a real leak.** Without it, dropping `@Expose` means nothing constrains _filtering_.
 `passwordHash` absent from the view but filterable ⇒
 `where: { passwordHash: { $prefix: 'a' } }` extracts it one character at a time. The view must
 govern what is queryable, not just what is returned.
@@ -146,11 +149,11 @@ live       1 evaluation per relevant WAL change,    A bad one costs that, foreve
 
 So they don't get the same capability budget.
 
-| Tier | Transport | Capability | Declaration |
-|---|---|---|---|
-| **1** | one-shot | nearly the full DSL: relation filters, depth-1/2 include, related counts, order-by-joined-column, offset | none |
-| **2** | live, incremental | predicates over the entity's **own columns** | none |
-| **3** | live, re-run-on-trigger | joins/aggregates kept live | **explicit, per entity** |
+| Tier  | Transport               | Capability                                                                                               | Declaration              |
+| ----- | ----------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **1** | one-shot                | nearly the full DSL: relation filters, depth-1/2 include, related counts, order-by-joined-column, offset | none                     |
+| **2** | live, incremental       | predicates over the entity's **own columns**                                                             | none                     |
+| **3** | live, re-run-on-trigger | joins/aggregates kept live                                                                               | **explicit, per entity** |
 
 Guardrails for Tier 1 are just RLS + `statement_timeout` + a row cap. Tier 2 is provably cheap:
 one predicate evaluation per WAL row, no DB round-trip, ~zero resident state.
@@ -159,23 +162,23 @@ one predicate evaluation per WAL row, no DB round-trip, ~zero resident state.
 
 Every join-shaped demand found across three codebases is **one-shot**:
 
-| Case | Tier |
-|---|---|
-| ortho `user.service.ts:98-125` — a literal users⋈practice join written as two queries | 1 |
-| ortho — the other 7 two-round-trip relation-filter workarounds | 1 |
-| rs-crm `contact.controller.ts:196` — junction double-hop + JS `Map` dedupe | 1 |
-| rs-crm `order: { activity: { occurred_at } }` ×4 — activity feeds | 1 |
-| rs-crm `PropertyListRow.tsx:22` — three hardcoded `0` counts | 1 |
-| cubix `backups.service.ts:296` — the one relation filter, redundant anyway | 1 |
+| Case                                                                                  | Tier |
+| ------------------------------------------------------------------------------------- | ---- |
+| ortho `user.service.ts:98-125` — a literal users⋈practice join written as two queries | 1    |
+| ortho — the other 7 two-round-trip relation-filter workarounds                        | 1    |
+| rs-crm `contact.controller.ts:196` — junction double-hop + JS `Map` dedupe            | 1    |
+| rs-crm `order: { activity: { occurred_at } }` ×4 — activity feeds                     | 1    |
+| rs-crm `PropertyListRow.tsx:22` — three hardcoded `0` counts                          | 1    |
+| cubix `backups.service.ts:296` — the one relation filter, redundant anyway            | 1    |
 
-What is actually *live* in those products — cubix's servers/nodes lists, rs-crm's thread list —
+What is actually _live_ in those products — cubix's servers/nodes lists, rs-crm's thread list —
 is single-table or a named server resource.
 
 **⇒ Tier 3 is plausibly empty on day one.** Build Tiers 1 and 2. Add Tier 3's declaration the
 first time something genuinely needs a join kept live.
 
-Independent corroboration: PostgREST **disables aggregates by default**, *"because they can
-create performance problems without appropriate safeguards."*
+Independent corroboration: PostgREST **disables aggregates by default**, _"because they can
+create performance problems without appropriate safeguards."_
 
 ---
 
@@ -194,13 +197,13 @@ evaluate(ast, row) → boolean  (in-memory, per WAL event)
 Break it and the snapshot disagrees with the live stream, which presents as a flaky UI rather
 than an error. This is the load-bearing correctness property of the package.
 
-Mongo got this for free — mingo *is* the Mongo query language, so SQL/in-memory symmetry was
+Mongo got this for free — mingo _is_ the Mongo query language, so SQL/in-memory symmetry was
 inherent. Postgres has no such symmetry, which is exactly the gap this package closes.
 
 Full AST, operator table with per-repo usage citations, and the three divergence hazards live in
 `query-dsl.ts`. Summary:
 
-- **Type fidelity** — pgoutput and node-postgres are *different decoders*. `timestamptz` is µs
+- **Type fidelity** — pgoutput and node-postgres are _different decoders_. `timestamptz` is µs
   in PG and ms in JS; `numeric` is arbitrary-precision; `uuid` compares by bytes in PG and
   UTF-16 in JS. One shared `decodeColumn(pgType, raw)` plus a per-type comparator. Never bare
   `===` / `<`.
@@ -223,7 +226,7 @@ Operators are justified by usage counts across the three repos, not by completen
 plus `$and $or $not` as real tree nodes.
 
 **Keep `$or`.** Supabase can't do it — `realtime.subscription.filters` is a Postgres composite
-*array* of `(column, op, value)`, and an array has no alternation node. Every one of their
+_array_ of `(column, op, value)`, and an array has no alternation node. Every one of their
 refusals (no OR, no cross-column, no casts, no joins) falls out of that one storage choice. We
 have an actual tree and mingo, so OR is nearly free — and it's used at 10 sites in cubix, 5 in
 rs-crm, and hand-rolled as a UNION + JS dedupe in ortho (`user-select-context.tsx:81-120`).
@@ -231,7 +234,7 @@ rs-crm, and hand-rolled as a UNION + JS dedupe in ortho (`user-select-context.ts
 Worth adopting from their list: `match`/`imatch` (POSIX regex) and `isdistinct` (NULL-safe `!=`,
 a first-class answer to the three-valued-logic hazard).
 
-**No client-supplied casts.** PostgREST: *"casting on horizontal filtering is not allowed."*
+**No client-supplied casts.** PostgREST: _"casting on horizontal filtering is not allowed."_
 One sentence that removes a class of injection and planner abuse, and it's what makes the
 per-type comparator approach sound — the column type alone determines the comparison.
 
@@ -247,10 +250,10 @@ generic inference with none of that machinery:
 
 ```ts
 client.jobs.list({
-  where: { status: EJobStatus.OPEN },   // keys ⊆ filterable columns (§2 probe)
-  select: ['id', 'name'],              // keys ⊆ view fields
+  where: { status: EJobStatus.OPEN }, // keys ⊆ filterable columns (§2 probe)
+  select: ['id', 'name'], // keys ⊆ view fields
   sort: [['createdAt', 'desc']],
-})  // → Pick<JobView, 'id' | 'name'>[]
+}); // → Pick<JobView, 'id' | 'name'>[]
 ```
 
 Typed model handles (`client.jobs`) over a `ModelMap`, not `'jobs'` string arguments.
@@ -298,7 +301,7 @@ export class AtlasClaimsBuilder implements ClaimsBuilder<Claims> {
 }
 ```
 
-The package never chooses your cache, serialization, or TTL. It owns *when*, you own *how*.
+The package never chooses your cache, serialization, or TTL. It owns _when_, you own _how_.
 
 **Why `invalidate` has to exist at all:** if you cache inside `build()`, the package calling
 `build()` again just gets your stale value back, and nothing appears broken. The package knows
@@ -318,7 +321,7 @@ Each `sources` entry becomes a WAL subscription. On a change, map the row → pr
 invalidate.
 
 **Map both tuples, old and new.** A membership moved between orgs, or deleted, must invalidate
-the principal it *left*. Mapping only `newRow` misses every revocation — the case this exists
+the principal it _left_. Mapping only `newRow` misses every revocation — the case this exists
 for.
 
 **Boot-time check:** every `sources` entity must be in the publication, else invalidation
@@ -354,7 +357,7 @@ changes. A revocation is indistinguishable from someone else's write removing th
 **Not an index the developer declares.** Postgres has a planner; choosing SQL indexes is its
 job. This is about a different problem.
 
-Per WAL event the server must answer: *which of my N open subscriptions does this row affect?*
+Per WAL event the server must answer: _which of my N open subscriptions does this row affect?_
 Naive answer is N predicate evaluations — 5,000 subscriptions × 200 writes/sec is a million
 evaluations a second.
 
@@ -376,33 +379,33 @@ sets in index-key space, matched by one shared log walk); we get the useful part
 requiring index declarations, which is the thing Firebase gets wrong.
 
 The routing column is **not** necessarily the tenant column. rs-crm has no tenancy at all (zero
-hits for `org_id`/`tenant_id`; authz is guard-level). It's *the highest-selectivity equality
-column present in nearly every subscription for that table* — `email_account_id` for rs-crm
+hits for `org_id`/`tenant_id`; authz is guard-level). It's _the highest-selectivity equality
+column present in nearly every subscription for that table_ — `email_account_id` for rs-crm
 threads, `customer_id` for cubix panel, `doctor`/`practice_ref` for ortho. Subscriptions lacking
 it go in a wildcard bucket that is always tested.
 
 Range predicates would want an interval tree rather than a hash bucket. The survey says ranges are
-almost always *secondary* to an equality (`status='held' AND expires_at > now`), so the equality
+almost always _secondary_ to an equality (`status='held' AND expires_at > now`), so the equality
 bucket narrows to a handful first and the range is just evaluated. **Interval trees serve a case
 none of the three codebases exhibits** — deferred, gated on profiling.
 
 ### 6.1 What must be decided now — structured constraints, not the router
 
-The router itself is swappable. What is *not* swappable later is the **compiler's output type**.
+The router itself is swappable. What is _not_ swappable later is the **compiler's output type**.
 
 A compiled query must expose its extracted constraints **as data**:
 
 ```ts
 interface CompiledQuery {
   table: string;
-  equalities: Map<string, Scalar>;    // → routing key(s)
+  equalities: Map<string, Scalar>; // → routing key(s)
   ranges: Array<{ column: string; lo?: Scalar; hi?: Scalar }>;
-  residual: Predicate;                // everything the router can't use
-  evaluate(row): boolean;             // the fine test
+  residual: Predicate; // everything the router can't use
+  evaluate(row): boolean; // the fine test
 }
 ```
 
-Hand back only an opaque `evaluate` closure and *any* routing at all becomes a breaking change to
+Hand back only an opaque `evaluate` closure and _any_ routing at all becomes a breaking change to
 every consumer. Emit structured constraints and equality-buckets → interval-trees → anything else
 is purely additive.
 
@@ -416,7 +419,7 @@ test, not two, and **one** snapshot query, not two. The client fans out to its o
 
 This is safe precisely at the socket boundary: every subscription on one socket shares one
 principal and one claims set, so their union stays inside that client's RLS envelope. Aggregating
-*across* sockets would not be safe — different claims.
+_across_ sockets would not be safe — different claims.
 
 Four wins, and the fourth is client-side:
 
@@ -425,7 +428,7 @@ Four wins, and the fourth is client-side:
    splits it. This is also the mitigation for the worst load spike in the system (§7.6).
 3. One socket emit per row, rather than one per matching subscription (relevant when filters
    overlap).
-4. **One row store per table per client**, with subscriptions as filtered *views* over it. Two
+4. **One row store per table per client**, with subscriptions as filtered _views_ over it. Two
    subscriptions on `jobs` currently mean two normalized `Map`s holding duplicate rows and two
    applications of the same patch.
 
@@ -437,20 +440,20 @@ make it real:
   to `orgId=A AND status IN (…)`: one hash lookup instead of 20 evaluations. Mechanical and
   bounded for the DNF shapes the surveyed repos actually produce (top-level OR of ANDs, never
   nested deeper). This is a real component with a real test surface — treat it as such.
-- **Or a deliberately coarse two-phase test.** Phase 1: does the row match the socket's *coarse*
+- **Or a deliberately coarse two-phase test.** Phase 1: does the row match the socket's _coarse_
   union (e.g. just `orgId=A`)? Most rows fail here and cost one comparison. Phase 2, only for
   survivors: route to specific subIds.
 
 **Phase 2 belongs on the client.** The server emits the row once at socket level; the client
 evaluates its own filters and routes to subscriptions. Server cost collapses to one union test per
-socket. The client already needs an evaluator for nothing extra — it's the *same* `evaluate` code
+socket. The client already needs an evaluator for nothing extra — it's the _same_ `evaluate` code
 as the server, not a third implementation.
 
 The knob this creates: **union precision trades client bandwidth against server CPU.** A coarse
 union ships rows no subscription wants. Make it explicit and tunable per deployment rather than
 implicit.
 
-What does *not* aggregate: `changedFields` is computed once per event at the leader (§7.6) because
+What does _not_ aggregate: `changedFields` is computed once per event at the leader (§7.6) because
 the diff is per-entity, not per-subscription. That path is already maximal.
 
 ---
@@ -478,11 +481,11 @@ the good side of the exact divide their whole scaling story is about crossing.
 
 ### 7.2 Two knobs, and only one matters
 
-| | Paid when | Paid by | Toggle |
-|---|---|---|---|
-| `REPLICA IDENTITY FULL` | **write time** | every writer, subscribers or not | `AccessExclusiveLock` |
-| publication membership | decode time | the leader | DDL, cheaper lock |
-| matching subscriptions | per event | the leader | **free — hash lookup** |
+|                         | Paid when      | Paid by                          | Toggle                 |
+| ----------------------- | -------------- | -------------------------------- | ---------------------- |
+| `REPLICA IDENTITY FULL` | **write time** | every writer, subscribers or not | `AccessExclusiveLock`  |
+| publication membership  | decode time    | the leader                       | DDL, cheaper lock      |
+| matching subscriptions  | per event      | the leader                       | **free — hash lookup** |
 
 `REPLICA IDENTITY FULL` is the real cost and it buys exactly two things: DELETE filtering and
 field-level patches. Opt out and a table degrades to full-row updates plus unfilterable deletes
@@ -519,12 +522,12 @@ rejected. `INSERT` still works — only `UPDATE`/`DELETE` are blocked.
 
 What each combination actually does:
 
-| Replica identity | Column list | UPDATE/DELETE | Old tuple | Excluded columns |
-|---|---|---|---|---|
-| `FULL` | none | ✅ | full old row on UPDATE **and** DELETE | all columns decoded |
-| `FULL` | any | ❌ **writes blocked** | — | — |
-| default (PK) | includes PK | ✅ | PK only | **never decoded — verified absent from the stream** |
-| default (PK) | omits PK | ❌ **writes blocked** | — | — |
+| Replica identity | Column list | UPDATE/DELETE         | Old tuple                             | Excluded columns                                    |
+| ---------------- | ----------- | --------------------- | ------------------------------------- | --------------------------------------------------- |
+| `FULL`           | none        | ✅                    | full old row on UPDATE **and** DELETE | all columns decoded                                 |
+| `FULL`           | any         | ❌ **writes blocked** | —                                     | —                                                   |
+| default (PK)     | includes PK | ✅                    | PK only                               | **never decoded — verified absent from the stream** |
+| default (PK)     | omits PK    | ❌ **writes blocked** | —                                     | —                                                   |
 
 Verified: with default replica identity + `(id, a)`, the excluded `secret` column appears **zero
 times** in the decoded stream, including on an `UPDATE` that changed it. Column lists do work —
@@ -551,19 +554,19 @@ rather than at startup.
 slot recreation and no reconnect — `pg_replication_slots.active_pid` stayed `160` across both
 ALTERs, and the stream was never interrupted:
 
-| Phase | Marker | In stream? |
-|---|---|---|
-| d1 published | `D1_BEFORE` | ✅ |
-| after `ADD TABLE d2` | `D2_AFTER_ADD` | ✅ **picked up mid-stream** |
-| after `ADD TABLE d2` | `D1_AFTER_ADD` | ✅ (d1 still published) |
-| after `DROP TABLE d1` | `D1_AFTER_DROP` | ❌ **stopped mid-stream** |
-| after `DROP TABLE d1` | `D2_AFTER_DROP` | ✅ |
+| Phase                 | Marker          | In stream?                  |
+| --------------------- | --------------- | --------------------------- |
+| d1 published          | `D1_BEFORE`     | ✅                          |
+| after `ADD TABLE d2`  | `D2_AFTER_ADD`  | ✅ **picked up mid-stream** |
+| after `ADD TABLE d2`  | `D1_AFTER_ADD`  | ✅ (d1 still published)     |
+| after `DROP TABLE d1` | `D1_AFTER_DROP` | ❌ **stopped mid-stream**   |
+| after `DROP TABLE d1` | `D2_AFTER_DROP` | ✅                          |
 
 So dynamic publication management works, and the leader can reconcile membership at runtime
 without dropping the slot or losing its position.
 
 **This makes the expand/contract discipline more important, not less.** A `DROP TABLE` takes
-effect *immediately* for the single shared consumer — so a v2 leader that drops a table v1 still
+effect _immediately_ for the single shared consumer — so a v2 leader that drops a table v1 still
 needs breaks v1 instantly, not eventually, and silently (v1 just stops receiving changes for that
 table; no error anywhere).
 
@@ -607,7 +610,7 @@ Three obligations that are easy to miss and expensive to discover:
 - **A slot admits exactly one active consumer.** That's why there's a leader at all. Everything
   else matches locally off the bus.
 - **Decoding is single-threaded per slot, inside the walsender.** This is the throughput ceiling,
-  and it's the same one Supabase ran into (§7.1). The leader must do *nothing* but decode,
+  and it's the same one Supabase ran into (§7.1). The leader must do _nothing_ but decode,
   normalize, and publish — every predicate evaluation happens downstream.
 
 **Sharding the decode is possible, and it costs the §9 guarantee.** Multiple publications + slots
@@ -619,6 +622,7 @@ consistency. Start with one.
 **Large transactions are the real robustness hazard.** A bulk migration or a 100k-row backfill
 arrives as one `BEGIN … COMMIT` stream and would fan out 100k deltas to every subscriber. Two
 defenses:
+
 - `streaming = on` (PG 14+) so in-progress transactions arrive incrementally instead of buffering
   the whole thing in the leader.
 - **A large-transaction escape hatch:** above a per-transaction row threshold, stop emitting
@@ -627,7 +631,7 @@ defenses:
 
 ### 7.6 Performance budget, and where the wins are
 
-Per WAL event the pipeline costs: decode → normalize → serialize → publish → *(per server)*
+Per WAL event the pipeline costs: decode → normalize → serialize → publish → _(per server)_
 route → evaluate → transform → diff → emit. Optimizations in descending value:
 
 1. **Serialize once at the leader, not per subscriber.** The normalized row + LSN is published
@@ -645,16 +649,17 @@ route → evaluate → transform → diff → emit. Optimizations in descending 
                    changedFields: string[] }   // the diff, computed once
    ```
 
-   **Security bonus:** a column in no transform output and no filterable set is dropped *before*
+   **Security bonus:** a column in no transform output and no filterable set is dropped _before_
    the publish — never in Redis, never in another server's memory, never one bug from a socket.
    That partially recovers what §7.3 lost: since column lists can't coexist with `FULL`, Postgres
-   *will* hand the leader every column, so the leader is the next-best strip boundary — one
+   _will_ hand the leader every column, so the leader is the next-best strip boundary — one
    process sees raw rows instead of all N.
 
    Cost: the leader now runs application code in the process that must keep pace with the
    walsender. Transforms are pure single-row functions and must stay cheap (§2 already requires
-   purity). If leader CPU becomes the ceiling, move transform+diff to a worker pool *after* the
+   purity). If leader CPU becomes the ceiling, move transform+diff to a worker pool _after_ the
    decode loop, keeping decode on its own thread.
+
 3. **Routing before evaluation** (§6) — a hash lookup instead of N predicate evaluations.
 4. **Result-hash dedup before emitting** — cheap per-subscription state; makes over-invalidation
    free on the wire and free on the client.
@@ -668,10 +673,10 @@ route → evaluate → transform → diff → emit. Optimizations in descending 
 
 ### 7.6.1 Scaling asymmetry — the one layer that isn't horizontal
 
-| Layer | Scaling |
-|---|---|
-| sockets, predicate matching, snapshot queries, fan-out | **horizontal** — add servers |
-| **WAL decode + leader transform** | **vertical only**, or shard into N slots — which forfeits §9, since two slots are two unordered LSN streams |
+| Layer                                                  | Scaling                                                                                                     |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| sockets, predicate matching, snapshot queries, fan-out | **horizontal** — add servers                                                                                |
+| **WAL decode + leader transform**                      | **vertical only**, or shard into N slots — which forfeits §9, since two slots are two unordered LSN streams |
 
 A replication slot admits exactly one consumer and decoding is single-threaded in the walsender.
 You cannot add walsenders to one slot. This is the only place where "throw hardware at it" stops
@@ -688,12 +693,13 @@ top.
 Postgres stores large values out-of-line, and on `UPDATE` an **unchanged TOASTed column is absent
 from the WAL** — even under `REPLICA IDENTITY FULL`. So the "new row" handed to a transform can
 be missing a column that didn't change, and naively running the transform over it produces a
-*wrong view* and a spurious diff claiming the field went null.
+_wrong view_ and a spurious diff claiming the field went null.
 
 Options, in preference order:
+
 1. Detect the unchanged-TOAST placeholder and carry the value forward from the old tuple — the
    old tuple has it under `REPLICA IDENTITY FULL`, so this is usually sufficient and free.
-2. If it's absent from both (INSERT-with-TOAST, or non-FULL table), mark the field *unknown*,
+2. If it's absent from both (INSERT-with-TOAST, or non-FULL table), mark the field _unknown_,
    omit it from the patch, and let the client refetch that row.
 3. Never fabricate. Emitting `null` for an absent TOASTed value is a correctness bug that looks
    like data loss.
@@ -707,10 +713,10 @@ This is a hard requirement of choosing transform-output diffing over column-set 
 
 Offset and keyset are not interchangeable, and the split is by tier:
 
-| Tier | Mechanism |
-|---|---|
-| 1 (one-shot) | `offset` is fine — it's what all three repos actually do |
-| 2/3 (live) | `after` + a **pinned end cursor**. `offset` is **rejected** |
+| Tier         | Mechanism                                                   |
+| ------------ | ----------------------------------------------------------- |
+| 1 (one-shot) | `offset` is fine — it's what all three repos actually do    |
+| 2/3 (live)   | `after` + a **pinned end cursor**. `offset` is **rejected** |
 
 Offset pagination in a live list is broken by construction: rows shift under the offset and the
 client sees duplicates and holes with no way to detect either.
@@ -730,12 +736,12 @@ move, so pages stay adjacent and non-overlapping.
 is deleted, 11 when one is inserted. `limit` is a first-execution hint, not an invariant.
 
 Unbounded growth needs a release valve: `pageStatus: 'SplitRecommended' | 'SplitRequired'` +
-`splitCursor`, with `maximumRowsRead` bounding work *before* residual filters apply so a page
+`splitCursor`, with `maximumRowsRead` bounding work _before_ residual filters apply so a page
 splits rather than blowing the query budget.
 
-This needs per-subscription server state surviving re-runs — Convex's **query journal**: *"a
+This needs per-subscription server state surviving re-runs — Convex's **query journal**: _"a
 serialized representation of decisions made during a query's execution… produced when a query
-function first executes and re-used when a query is re-executed."* Generalizes beyond cursors to
+function first executes and re-used when a query is re-executed."_ Generalizes beyond cursors to
 anything non-deterministic that must stay stable (sampling, tie-breaks, an "as of" boundary).
 
 Protocol additions: `endCursor`, `pageStatus`, `splitCursor`, `journal`.
@@ -787,11 +793,11 @@ cheap, incremental where it must be live.
 
 **Three dedupe layers, all needed.**
 
-| Layer | Keyed by | Catches |
-|---|---|---|
-| RTK Query | `endpointName + serializeQueryArgs(args)` | same endpoint + args, many components |
-| `RealtimeClient` refcount | `canonicalize(spec)` | **different** endpoints, identical query |
-| socket-level union (§6.2) | `(table)` per socket | many *different* queries on one table → one server-side test + one snapshot |
+| Layer                     | Keyed by                                  | Catches                                                                     |
+| ------------------------- | ----------------------------------------- | --------------------------------------------------------------------------- |
+| RTK Query                 | `endpointName + serializeQueryArgs(args)` | same endpoint + args, many components                                       |
+| `RealtimeClient` refcount | `canonicalize(spec)`                      | **different** endpoints, identical query                                    |
+| socket-level union (§6.2) | `(table)` per socket                      | many _different_ queries on one table → one server-side test + one snapshot |
 
 Without layer 2, `getOpenJobs` and `getJobsForSidebar` — different endpoints, identical query — open
 two wire subscriptions for identical server work. Release with a short linger so a remount inside
@@ -817,7 +823,7 @@ Consequences to build for deliberately:
 
 - The client needs the **same `evaluate`** the server uses — shared code, not a reimplementation.
   This is why the AST must be plain data and the evaluator isomorphic (§4.1).
-- Rows arrive that match *no* subscription when the union is coarse. Store them or drop them, but
+- Rows arrive that match _no_ subscription when the union is coarse. Store them or drop them, but
   decide explicitly; storing means later subscriptions on that table can sometimes serve from cache.
 - Membership transitions (`add`/`remove`) are now derived **client-side** per subscription rather
   than sent per subscription. The server sends "row X changed"; the client decides which of its
@@ -833,15 +839,17 @@ distinct args then fight over.)
 ## 11. Stolen, with attribution
 
 **Supabase**
+
 - Validate at subscribe time, never in the WAL hot path (they compile/validate regexes at
   subscription creation).
 - **Degrade, don't drop** on oversized payloads — `Error 413` retains fields ≤64 bytes so the
-  client learns *which row* changed and can refetch. A stub beats silence.
+  client learns _which row_ changed and can refetch. A stub beats silence.
 - Reject no-PK tables at boot (`Error 400: no primary key`).
 - No client-supplied casts.
 - Aggregates off by default, for cost reasons.
 
 **Convex**
+
 - Read set / routing as a keyed structure matched by **one pass** over the change log, rather
   than per-subscription evaluation (§6).
 - **Result-hash dedup before pushing.** Cheap per-subscription state that makes over-invalidation
@@ -852,6 +860,7 @@ distinct args then fight over.)
 - Same-snapshot guarantee across a client's subscriptions (§9).
 
 **Explicitly not copied**
+
 - Convex: no joins/aggregates in the engine (we have SQL — a 32k-doc scan cap plus a JS `reduce`
   is a downgrade), full values on the wire, `.filter()` not narrowing the read set.
 - Supabase: per-subscriber authorization, flat-array filters, unfilterable deletes, and no
@@ -862,17 +871,17 @@ distinct args then fight over.)
 
 ## 12. Open items
 
-| # | Item | Blocking? |
-|---|---|---|
-| ~~1~~ | ~~Spike: column lists × `REPLICA IDENTITY FULL`~~ — **RESOLVED (PG 16.14): mutually exclusive; blocks UPDATE/DELETE at DML time. Per-table Tier A/B choice + boot validation.** (§7.3) | closed |
-| ~~2~~ | ~~Spike: in-flight publication membership changes~~ — **RESOLVED (PG 16.14): both ADD and DROP take effect mid-stream, same `active_pid`, no slot recreation. Raises the stakes on expand/contract.** (§7.4) | closed |
-| ~~3~~ | ~~Routing: equalities vs interval tree~~ — **RESOLVED: the router is swappable; what's fixed now is that the compiler emits STRUCTURED CONSTRAINTS (§6.1). Equality-bucket router for v1.** | closed |
-| 4 | **Union precision knob** (§6.2) — how coarse is the per-socket union? Needs a default and a way to tune it | before v1 ship |
-| 5 | Predicate simplifier scope (§6.2) — factor common conjuncts into `IN` sets, or coarse two-phase only? | affects §6.2 build |
-| 6 | Coarse-union rows matching no subscription — store in the client's table cache or drop? (§10.1) | before v1 ship |
-| 7 | Tier 3's declaration syntax — deferred until a real use case exists | no |
-| 8 | Transform purity: enforce by lint, by runtime double-execution in dev, or by documentation? | no |
-| 9 | Whether `$match`/`$imatch` (regex) earn a place — zero usage in the surveyed repos | no |
+| #     | Item                                                                                                                                                                                                         | Blocking?          |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| ~~1~~ | ~~Spike: column lists × `REPLICA IDENTITY FULL`~~ — **RESOLVED (PG 16.14): mutually exclusive; blocks UPDATE/DELETE at DML time. Per-table Tier A/B choice + boot validation.** (§7.3)                       | closed             |
+| ~~2~~ | ~~Spike: in-flight publication membership changes~~ — **RESOLVED (PG 16.14): both ADD and DROP take effect mid-stream, same `active_pid`, no slot recreation. Raises the stakes on expand/contract.** (§7.4) | closed             |
+| ~~3~~ | ~~Routing: equalities vs interval tree~~ — **RESOLVED: the router is swappable; what's fixed now is that the compiler emits STRUCTURED CONSTRAINTS (§6.1). Equality-bucket router for v1.**                  | closed             |
+| 4     | **Union precision knob** (§6.2) — how coarse is the per-socket union? Needs a default and a way to tune it                                                                                                   | before v1 ship     |
+| 5     | Predicate simplifier scope (§6.2) — factor common conjuncts into `IN` sets, or coarse two-phase only?                                                                                                        | affects §6.2 build |
+| 6     | Coarse-union rows matching no subscription — store in the client's table cache or drop? (§10.1)                                                                                                              | before v1 ship     |
+| 7     | Tier 3's declaration syntax — deferred until a real use case exists                                                                                                                                          | no                 |
+| 8     | Transform purity: enforce by lint, by runtime double-execution in dev, or by documentation?                                                                                                                  | no                 |
+| 9     | Whether `$match`/`$imatch` (regex) earn a place — zero usage in the surveyed repos                                                                                                                           | no                 |
 
 ## 13. Build order
 
@@ -907,12 +916,12 @@ no WAL and no sockets at all.
 
 The original design assumed TypeORM throughout ("One package owning everything database-shaped
 for a NestJS + Postgres + TypeORM app", §1). That assumption is now reversed: **the package is
-Prisma-first.** This section states why, what it changes, and what it deliberately does *not*
+Prisma-first.** This section states why, what it changes, and what it deliberately does _not_
 abstract.
 
 **The name is `pgbase`** (`@workspace/pgbase`, `dennisofficial/pgbase`), not
 `@workspace/nestjs-database` as written throughout §1–13. Read every occurrence of the old name as
-this one. The rename reflects that this is a server *and* client package — a self-hosted Postgres
+this one. The rename reflects that this is a server _and_ client package — a self-hosted Postgres
 BaaS — rather than a NestJS-only library; the framework bindings live behind subpath exports
 (`/nest`, `/client`, `/react`) instead of in the name.
 
@@ -920,34 +929,34 @@ BaaS — rather than a NestJS-only library; the framework bindings live behind s
 
 Measured against the live Atlas backend, not estimated:
 
-| | count |
-|---|---|
-| entity files (active, excl. `_old`) | **18**, all in `_lib/database/entities/` |
-| files importing `typeorm` | 31 |
-| `db.scoped()` / `db.unsafe()` call sites | **28** |
-| `InjectRepository` | **0** |
-| migrations | 15 files / 938 LOC |
-| active backend | 10,270 LOC |
+|                                          | count                                    |
+| ---------------------------------------- | ---------------------------------------- |
+| entity files (active, excl. `_old`)      | **18**, all in `_lib/database/entities/` |
+| files importing `typeorm`                | 31                                       |
+| `db.scoped()` / `db.unsafe()` call sites | **28**                                   |
+| `InjectRepository`                       | **0**                                    |
+| migrations                               | 15 files / 938 LOC                       |
+| active backend                           | 10,270 LOC                               |
 
 Two facts make this a ~1-day migration rather than a project:
 
 - **Zero direct repository injection.** All data access already funnels through the `Db` facade —
-  and *this package replaces that facade*. Those 28 call sites are touched no matter which ORM
+  and _this package replaces that facade_. Those 28 call sites are touched no matter which ORM
   wins, so they are not incremental Prisma cost.
 - Atlas is pre-production. 15 migrations squash to one Prisma baseline via introspection.
 
 ## 14.2 Why Prisma, on the merits
 
-**1. It converts §1's stated residual risk into a compile error.** §1: *"The residual risk is
-registry completeness, and it is the thing this design must engineer against."* `Prisma.ModelName`
-is a union generated *from the schema*, so the policy registry can be made exhaustive by the type
+**1. It converts §1's stated residual risk into a compile error.** §1: _"The residual risk is
+registry completeness, and it is the thing this design must engineer against."_ `Prisma.ModelName`
+is a union generated _from the schema_, so the policy registry can be made exhaustive by the type
 checker. TypeORM has no generated name union — the equivalent is a hand-maintained list that
 drifts, which is why the original design could only offer runtime fail-closed plus a boot log.
 This argument exists on the Prisma side only, and it is the strongest one.
 
 **2. Prisma's `where` is structurally the AST.** Nestable `AND`/`OR`/`NOT`, native `include`,
 and `_count` for related-row counts (the three hardcoded `0`s in rs-crm list rows). TypeORM's
-find-options cannot nest OR at all — it is a flat object where an array *means* OR, the same
+find-options cannot nest OR at all — it is a flat object where an array _means_ OR, the same
 storage limitation §4.2 criticizes Supabase for, and the reason both reference adapters throw
 (`pg-realtime/src/typeorm/index.ts:65`).
 
@@ -957,7 +966,7 @@ means reaching into `dataSource.driver.master` or running two pools.
 
 > **Verified 2026-07-29, and stronger than stated.** In Prisma 7 the `prisma-client` generator is
 > **driver-adapter-only** for Postgres — the Rust query engine is gone, and `adapter` is a
-> *required* constructor argument, not an option. So this is not a Prisma capability we hope
+> _required_ constructor argument, not an option. So this is not a Prisma capability we hope
 > consumers opt into; it is the only way a Prisma 7 Postgres app can exist. pgbase can therefore
 > **require** a `pg.Pool` at the seam and know the consumer already has one, rather than
 > defensively constructing a second pool.
@@ -968,8 +977,8 @@ fn-default re-emit loop; the HNSW prune step).
 ### What this costs, stated plainly
 
 - **Co-location dies — partially recovered, not fixed.** `@Rls`/`@RlsTransform` on the entity class
-  becomes a policy file next to the model's service. §2's substantive claim — *the transform is the
-  schema contract* — survives intact; *it sits on the entity* does not. This is the design's stated
+  becomes a policy file next to the model's service. §2's substantive claim — _the transform is the
+  schema contract_ — survives intact; _it sits on the entity_ does not. This is the design's stated
   ergonomic center and the real price of the switch.
 
   **Multi-file schemas soften it.** Folder schemas are GA in Prisma 7 (configured by pointing
@@ -987,6 +996,7 @@ fn-default re-emit loop; the HNSW prune step).
 
   Residual cost: the DMMF carries no source-file provenance, so boot validation can name the model
   (`no policy registered for Job`) but not the file it was declared in.
+
 - **Row-value keyset cursors need `$queryRaw`.** Prisma has no native `(a, b) < ($1, $2)`. Same
   escape-hatch class as TypeORM's `Raw()` today; one bounded piece of the Tier 1 compiler.
 - **Prisma is the less boring bet.** The query-compiler / TS-client transition is in motion.
@@ -1005,50 +1015,50 @@ export const jobPolicy = definePolicy('Job', {
     name: job.name,
     status: job.status,
     createdAt: job.createdAt,
-    isStale: job.updatedAt < subDays(job.createdAt, 7),   // derived fields still work
+    isStale: job.updatedAt < subDays(job.createdAt, 7), // derived fields still work
   }),
   rls: {
-    read:   (c: Claims) => ({ orgId: { $in: c.orgIds } }),
+    read: (c: Claims) => ({ orgId: { $in: c.orgIds } }),
     update: (c: Claims) => ({ orgId: { $in: c.ownerOrgIds } }),
     create: false,
     delete: false,
   },
-})
+});
 ```
 
 ```ts
 // policies.ts — the registry. Exhaustive BY TYPE.
 export const policies = {
-  Job:            jobPolicy,
-  User:           userPolicy,
+  Job: jobPolicy,
+  User: userPolicy,
   OrganizationMember: orgMemberPolicy,
-  _PrismaMigration:   NO_CLIENT_ACCESS,   // deliberate opt-out, not an omission
-} satisfies { [M in Prisma.ModelName]: PolicyFor<M> }
+  _PrismaMigration: NO_CLIENT_ACCESS, // deliberate opt-out, not an omission
+} satisfies { [M in Prisma.ModelName]: PolicyFor<M> };
 ```
 
 **The `NO_CLIENT_ACCESS` sentinel is the point.** Omission is a `tsc` error, so a new model cannot
-reach production without someone *deciding* whether clients may read it. §2's secure-by-default
+reach production without someone _deciding_ whether clients may read it. §2's secure-by-default
 table is unchanged in effect, but two of its three rows move from runtime to compile time:
 
-| Missing | Original | Amended |
-|---|---|---|
-| policy for a model | runtime deny + boot log | **compile error** |
-| `transform` | not queryable (runtime) | **compile error** (required field) |
+| Missing                             | Original                         | Amended                                           |
+| ----------------------------------- | -------------------------------- | ------------------------------------------------- |
+| policy for a model                  | runtime deny + boot log          | **compile error**                                 |
+| `transform`                         | not queryable (runtime)          | **compile error** (required field)                |
 | column absent from transform output | never returned, never filterable | unchanged — still the runtime sentinel probe (§2) |
 
 The sentinel probe survives verbatim; it now reads transforms out of the registry instead of off
 decorator metadata. Everything in §2 about probe semantics, derived fields, transform purity, and
-diffing transform *outputs* is unchanged.
+diffing transform _outputs_ is unchanged.
 
 ## 14.4 Amends §4.1 — two compile targets, split by tier
 
 §4.1 says `compile(ast) → SQL (parameterized, via TypeORM)`. That single target was wrong; the
 tiers have different needs and §3 already separates them.
 
-| Tier | Target | Executed by | Why |
-|---|---|---|---|
+| Tier           | Target                                            | Executed by   | Why                                                                                                                                                                                   |
+| -------------- | ------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **1** one-shot | Prisma `where` / `include` / `orderBy` / `_count` | Prisma client | this is the expressive tier — joins, depth-1/2 includes, related counts. Hand-rolling join aliasing and nested-object assembly is the largest avoidable chunk of work in the package. |
-| **2** live | SQL text + params | `pg.Pool` | snapshot is `SELECT … WHERE <union> LIMIT n`; rows are column bags fed straight to the transform. §7.6 explicitly wants no hydration, so there is nothing for an ORM to do. |
+| **2** live     | SQL text + params                                 | `pg.Pool`     | snapshot is `SELECT … WHERE <union> LIMIT n`; rows are column bags fed straight to the transform. §7.6 explicitly wants no hydration, so there is nothing for an ORM to do.           |
 
 The developer writes neither. Both are outputs of the package's compiler; clients still send
 object literals, never strings. **The wire vocabulary for both tiers is Prisma's own operator
@@ -1056,7 +1066,7 @@ names — see §14.9, which replaces §4.2's Mongo-style `$eq`/`$in`/`$ilike` se
 
 **Consequence worth banking: `evaluate` only ever runs on Tier 2 predicates.** Tier 2 is
 own-columns-only by definition (§3), so §4.1's differential property suite — the load-bearing
-correctness obligation — covers the own-column operator subset and *not* includes, counts, or
+correctness obligation — covers the own-column operator subset and _not_ includes, counts, or
 joined-column sorts. That is a materially smaller suite than §4.1 implies.
 
 Escape hatch: `$queryRaw` for the row-value keyset cursor of §8. It is package-internal and never
@@ -1064,7 +1074,7 @@ reachable from the wire.
 
 ## 14.5 Amends §4.1 hazard #1 — one decoder, two comparators
 
-Hazard #1 is stated as *"pgoutput and node-postgres are different decoders."* That is only true if
+Hazard #1 is stated as _"pgoutput and node-postgres are different decoders."_ That is only true if
 we let it be. Both the WAL path and the snapshot path can parse through **`pg-types`'
 `getTypeParser(typeOid)`** — the same registry node-postgres uses. (`@prisma/pulse-cdc-pg` does
 exactly this at `PgoutputDecoder.ts:312`.)
@@ -1076,7 +1086,7 @@ What that kills, and what it doesn't:
   a µs source; `numeric`/`int8` arrive as strings; `uuid` compares UTF-16 in JS and bytes in PG;
   `citext` is case-insensitive only in PG.
 
-So `decodeColumn` shrinks to *"use the shared `pg-types` parser"*, and the per-type **comparator**
+So `decodeColumn` shrinks to _"use the shared `pg-types` parser"_, and the per-type **comparator**
 work stands unchanged. Hazards #2 (collation) and #3 (three-valued logic) are untouched.
 
 ## 14.6 The ORM boundary — two internal ports, one deliberate non-port
@@ -1097,7 +1107,7 @@ authoritative. `pg-realtime/src/engine/db.ts:resolvePrimaryKey` already reads th
 This split removes the most divergence-prone half of the metadata surface.
 
 **Do NOT build a dual-ORM Tier 1 compiler adapter.** Write it directly against Prisma. A port needs
-a real swap *and* a live consumer; a TypeORM adapter with no TypeORM consumer is precisely the kind
+a real swap _and_ a live consumer; a TypeORM adapter with no TypeORM consumer is precisely the kind
 of speculative port stripped from v3 wholesale. The `SchemaProvider` boundary already means that if
 a second ORM ever appears, the Tier 1 compiler is the only ORM-shaped thing to reimplement — the
 cheap-to-revisit property, without paying for it now.
@@ -1107,13 +1117,13 @@ cheap-to-revisit property, without paying for it now.
 `@prisma/pulse-toolkit` (`@prisma/pulse-cdc-pg`, Apache-2.0) was reviewed. **Status: `0.0.0`, two
 commits, last 2024-11-06, and Prisma discontinued Pulse in early 2025.** Not a dependency to take.
 
-Two things in it are worth taking as *ideas*:
+Two things in it are worth taking as _ideas_:
 
 1. **TOAST carry-forward, already implemented correctly.** `PgoutputDecoder.ts:366` —
    `case 0x75 /*u unchanged toast datum*/: tuple[name] = unchangedToastFallback?.[name]`, with the
    old tuple passed as fallback at line 268. That is §7.6's option 1 verbatim, and it yields
    `undefined` rather than `null` when unavailable — options 2 and 3. Compare what we have today:
-   `pg-realtime/src/engine/toast.ts` only *detects* the hole and pays a `refetchOnUpdate` DB
+   `pg-realtime/src/engine/toast.ts` only _detects_ the hole and pays a `refetchOnUpdate` DB
    round-trip. **Carry-forward replaces refetch.** ~15 lines on our existing stack.
 2. The `pg-types` decoder sharing of §14.5.
 
@@ -1134,11 +1144,11 @@ the obvious route is dead and the design changes because of it.**
 
 ### `Prisma.dmmf` is not usable
 
-| Route | Result |
-|---|---|
-| `Prisma.dmmf`, new `prisma-client` generator (the default) | **absent entirely** — `'dmmf' in Prisma` is `false` |
-| `Prisma.dmmf`, legacy `prisma-client-js` | present but **gutted**: no `nativeType`, no `isId`/`isList`/`isRequired`/`isUnique`, no `relationFromFields`/`relationToFields`, no composite `@@id`, no `uniqueFields`, and **enums come back as an empty array** |
-| `getDMMF()` from `@prisma/internals`, parsing schema text | **complete** — every field above present, incl. `nativeType: ["Timestamptz",["6"]]` and correctly-resolved self-relations |
+| Route                                                      | Result                                                                                                                                                                                                             |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Prisma.dmmf`, new `prisma-client` generator (the default) | **absent entirely** — `'dmmf' in Prisma` is `false`                                                                                                                                                                |
+| `Prisma.dmmf`, legacy `prisma-client-js`                   | present but **gutted**: no `nativeType`, no `isId`/`isList`/`isRequired`/`isUnique`, no `relationFromFields`/`relationToFields`, no composite `@@id`, no `uniqueFields`, and **enums come back as an empty array** |
+| `getDMMF()` from `@prisma/internals`, parsing schema text  | **complete** — every field above present, incl. `nativeType: ["Timestamptz",["6"]]` and correctly-resolved self-relations                                                                                          |
 
 The client-side `Prisma.dmmf` has been progressively thinned across releases for bundle-size
 reasons (prisma/prisma#13811, #27349). Building on it is a bet against a documented trend, not a
@@ -1151,8 +1161,8 @@ It needs no DB connection and no generated client — it parses `schema.prisma` 
 - **3.5 MB of JS plus a 2.8 MB WASM schema parser** (`prisma_schema_build_bg.wasm`), loaded by a
   runtime `fs.readFileSync` relative to `__dirname` that bundlers do not inline. The naive esbuild
   output dies with `ENOENT: … prisma_schema_build_bg.wasm` until the WASM is copied alongside.
-- `@prisma/internals` ships the literal description *"This package is intended for Prisma's
-  internal use."*
+- `@prisma/internals` ships the literal description _"This package is intended for Prisma's
+  internal use."_
 
 ### Decision: a custom Prisma generator, not a boot-time call
 
@@ -1181,17 +1191,17 @@ change. That is ordinary Prisma workflow.
 
 ### The generator emits DATA ONLY — never types
 
-The obvious objection is *"why generate anything? the consumer already ran `prisma generate`."*
+The obvious objection is _"why generate anything? the consumer already ran `prisma generate`."_
 Answered by separating two needs that are easy to conflate:
 
-| Need | Source |
-|---|---|
+| Need                                                                                                              | Source                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | **Types** — `Prisma.ModelName`, model row shapes, `$Enums`, the basis for `LiveWhere<M>` and view-field narrowing | **the consumer's own generated client.** pgbase generates none of this and must never duplicate it. |
-| **Runtime data** — the physical name mapping | **our generator.** Nothing else can supply it. |
+| **Runtime data** — the physical name mapping                                                                      | **our generator.** Nothing else can supply it.                                                      |
 
 The second row is not a preference. **Logical decoding hands the leader `jobs` and `created_at`;
 it never says `Job` or `createdAt`.** Connecting a WAL event to a model, a policy, or a transform
-requires that mapping *as runtime data*, and TypeScript types are erased. `@@map` is arbitrary so
+requires that mapping _as runtime data_, and TypeScript types are erased. `@@map` is arbitrary so
 convention cannot recover it, and `pg_catalog` knows the physical side but has never heard of a
 Prisma model name.
 
@@ -1213,7 +1223,7 @@ client, no query surface.
 
 **It is gitignored, not committed.** An earlier draft of this section said the opposite; that was
 wrong. The consumer already runs `prisma generate` and already gitignores `generated/prisma/`, so
-emitting beside it means the consumer manages *zero* extra files rather than two. Committing bought
+emitting beside it means the consumer manages _zero_ extra files rather than two. Committing bought
 nothing — deployment already depends on `prisma generate` for the client itself.
 
 ### Why not skip the generator and parse `inlineSchema` at boot?
@@ -1221,8 +1231,8 @@ nothing — deployment already depends on `prisma generate` for the client itsel
 The generated client embeds the whole merged schema as text under `inlineSchema`, so in principle
 pgbase could read and parse it at boot and emit no file at all. Rejected on two grounds:
 
-1. **It lives in `internal/class.ts`, which Prisma banner-marks *"🛑 Under no circumstances should
-   you import this file directly!"*** — a worse stability bet than the public generator API.
+1. **It lives in `internal/class.ts`, which Prisma banner-marks _"🛑 Under no circumstances should
+   you import this file directly!"_** — a worse stability bet than the public generator API.
 2. **It would make us the owners of a PSL parser.** Prisma's grammar moves (multi-file schemas and
    `moduleFormat` both landed recently); a parser that silently mis-maps one `@map` is a data-
    correctness bug in the tenant-isolation path. Using Prisma's own parse via the official
@@ -1240,9 +1250,9 @@ come from `pg_catalog`.
 > **Measured 2026-07-30 against the example app.** The join table is physically real
 > (`_JobToTag`) and, in Prisma 7, gets a genuine composite primary key (`_JobToTag_AB_pkey`), not
 > merely a unique index. Two consequences, both favourable: §7.5's reject-no-PK-tables check does
-> not trip on it, and it needs **no** `REPLICA IDENTITY FULL` — for a join table the PK *is* the
+> not trip on it, and it needs **no** `REPLICA IDENTITY FULL` — for a join table the PK _is_ the
 > whole row, so default replica identity already delivers a complete old tuple on DELETE. The
-> outstanding work is therefore only *discovery* (its name and columns must come from
+> outstanding work is therefore only _discovery_ (its name and columns must come from
 > `pg_catalog`), not special-case replication handling.
 
 ### Incidental finding
@@ -1262,17 +1272,17 @@ mechanism. The fixture's five files had to be concatenated by hand.
 Three further blockers:
 
 - **The filter grammar is not a serializable tree.** `.where()` takes `(fields, fns) =>
-  Expression<Boolean>` — an executable closure AST. The plain-object shorthand is flat,
+Expression<Boolean>` — an executable closure AST. The plain-object shorthand is flat,
   equality-only, implicitly ANDed, no per-field operators, no nesting. §14.9's vocabulary decision
   rests on v7's `where` being a nestable JSON tree; none of this can serve that role.
-- **`@prisma-next/contract`** — the package we would import — is banner-marked *"Internal package…
-  Do not depend on this package directly."*
+- **`@prisma-next/contract`** — the package we would import — is banner-marked _"Internal package…
+  Do not depend on this package directly."_
 - **38 breaking changes across 5 minors in ~2 months**, and 0.16.0 changed `contract.json`'s own
   shape (`foreignKeys[]`/`indexes[]` split). Also: implicit m2m cannot be authored at all, `@db.*`
   cannot be inline (must be hoisted to a `types{}` alias), and a bare `enum{}` compiles to `text` +
   a CHECK constraint rather than a native Postgres enum.
 
-**Two findings kept.** First, Prisma Next's architecture *endorses* the §14.8 decision — its
+**Two findings kept.** First, Prisma Next's architecture _endorses_ the §14.8 decision — its
 metadata artifact bundles to 59 KB with zero WASM, against `getDMMF()`'s 3.5 MB + 2.8 MB WASM. The
 static-emitted-artifact shape is right; we just emit it ourselves. Second, `@prisma-next/driver-
 postgres` takes `{ kind: 'pgPool', pool }` — a user-supplied `pg.Pool` — so §14.2's pooling
@@ -1286,7 +1296,7 @@ Revisit on a stated stability commitment (1.0, or a documented contract-schema g
 query vocabulary — after SQL and Prisma — that nobody on this stack already knows, and it does not
 match the ORM the package is now built on. Use **Prisma's own operator names**.
 
-The surfaces then differ by tier, but the *syntax* is identical:
+The surfaces then differ by tier, but the _syntax_ is identical:
 
 **Tier 1 (one-shot) takes Prisma's args directly.** There is no in-memory matcher on this path —
 it is SQL, RLS ANDs in, `statement_timeout` and a row cap bound it. The only work is narrowing the
@@ -1297,37 +1307,45 @@ the expressiveness win actually lands.
 **Tier 2 (live) takes a type-level subset of the same shape.** Not the full `WhereInput`:
 
 ```ts
-type LiveWhere<M> =
-  & { AND?: LiveWhere<M>[]; OR?: LiveWhere<M>[]; NOT?: LiveWhere<M> }
-  & { [F in ViewScalarField<M>]?: FieldType<M, F> | LiveFilter<FieldType<M, F>> }
+type LiveWhere<M> = { AND?: LiveWhere<M>[]; OR?: LiveWhere<M>[]; NOT?: LiveWhere<M> } & {
+  [F in ViewScalarField<M>]?: FieldType<M, F> | LiveFilter<FieldType<M, F>>;
+};
 
 type LiveFilter<T> = {
-  equals?: T; not?: T; in?: T[]; notIn?: T[]
-  lt?: T; lte?: T; gt?: T; gte?: T
-  contains?: string; startsWith?: string; endsWith?: string
-  mode?: 'insensitive'          // was §4.2's $ilike; carries hazard #2 unchanged
-}
+  equals?: T;
+  not?: T;
+  in?: T[];
+  notIn?: T[];
+  lt?: T;
+  lte?: T;
+  gt?: T;
+  gte?: T;
+  contains?: string;
+  startsWith?: string;
+  endsWith?: string;
+  mode?: 'insensitive'; // was §4.2's $ilike; carries hazard #2 unchanged
+};
 ```
 
 ### Why Tier 2 cannot just take `Prisma.ModelWhereInput`
 
 This is the most tempting shortcut available and it is the one the Mongo predecessor makes look
 free. `nestjs-realtime-mongo` put `FilterQuery<T>` straight on the wire and it worked **because in
-Mongo the query language *is* the matcher language** — mingo evaluates `FilterQuery` in memory.
+Mongo the query language _is_ the matcher language** — mingo evaluates `FilterQuery` in memory.
 There is no mingo for `Prisma.JobWhereInput`. Three consequences:
 
 1. **No code is saved on the hard half.** You write the in-memory evaluator either way.
 2. **The evaluator would owe the whole surface** — `some`/`every`/`none`, nested relation
    traversal, JSON path filters — none of which are evaluable against a single-table WAL row. The
-   subset ends up defined by *exclusion*, which is far worse to security-review than inclusion.
+   subset ends up defined by _exclusion_, which is far worse to security-review than inclusion.
 3. **The AST is a security boundary and must be CLOSED.** `WhereInput` is a surface Prisma can
    extend in a minor version. A new operator the evaluator doesn't know is either a crash or —
    worse — a filter that means one thing in SQL and another in memory. §4.1's invariant becomes
    un-holdable against a moving target, and the differential suite loses its enumerable domain.
 
-There is also a DX/leak argument: `WhereInput` is generated over *all* model fields, so the types
+There is also a DX/leak argument: `WhereInput` is generated over _all_ model fields, so the types
 would autocomplete `passwordHash` while the runtime rejected it. `ViewScalarField<M>` is derived
-from the transform (§2's sentinel probe), so the filter-oracle is closed *in the type system*
+from the transform (§2's sentinel probe), so the filter-oracle is closed _in the type system_
 rather than by a runtime denial.
 
 ## 14.10 Native Postgres RLS — rejected for v1, with a roadmap backstop
@@ -1336,10 +1354,10 @@ rather than by a runtime denial.
 construct; the WAL has no notion of them. So on Tier 2 — live subscriptions, the entire point of
 this package — native RLS contributes nothing, and the in-memory predicate is still required.
 
-This is not a theoretical objection. It is *the* reason Supabase Realtime doesn't scale. Unable to
+This is not a theoretical objection. It is _the_ reason Supabase Realtime doesn't scale. Unable to
 evaluate a policy against a WAL tuple, `realtime.apply_rls` re-`SELECT`s each row per subscriber
 under role impersonation — which §7.1 traces directly to their ~3,000-subscriber cliff, their
-single-threaded ordering, and their unfilterable DELETEs. Native RLS *causes* that architecture.
+single-threaded ordering, and their unfilterable DELETEs. Native RLS _causes_ that architecture.
 
 Three secondary costs:
 
@@ -1349,7 +1367,7 @@ Three secondary costs:
   a GUC string and re-parsing them inside every policy, on every query.
 - **`SET LOCAL` requires transaction-scoped connections**, constraining pooling.
 
-**Roadmap item, not v1.** Policies are already data in the registry (§14.3), so a *third* emitter —
+**Roadmap item, not v1.** Policies are already data in the registry (§14.3), so a _third_ emitter —
 `compilePolicyToSql()` → `CREATE POLICY` statements in a generated migration — would give
 database-enforced defense-in-depth on the SQL path from the same single source of truth, with no
 drift. That directly serves §1's fail-closed requirement. Deferred because §4.1's two-interpreter
@@ -1362,7 +1380,7 @@ surface. Revisit once the differential suite is green.
 
 Evaluated and rejected. Its `package.json` keywords are `phoenix`, `elixir`: it is the client half
 of Supabase's **Elixir** server, speaking the Phoenix Channels wire protocol. Adopting it means
-implementing Phoenix Channels *in NestJS* — join/leave/push/reply, refs, join_refs, heartbeats,
+implementing Phoenix Channels _in NestJS_ — join/leave/push/reply, refs, join_refs, heartbeats,
 topic naming — to replace a socket.io mux + superjson parser that already works
 (`pg-realtime/src/socketio/`). That is more code, not less.
 
@@ -1386,20 +1404,20 @@ reads live TypeORM `EntityMetadata` at runtime (`build-realtime-models.ts` walks
 pgbase can replace it leaves the realtime engine unable to start. Deferring the migration avoids
 both a broken middle state and a throwaway port of that metadata layer.
 
-| Phase | Deliverable | Review surface |
-|---|---|---|
-| **0** | **Example app** — `examples/api` (NestJS) + `examples/web` (Next + RTK) + docker-compose Postgres at `wal_level=logical`, with a deliberately *hostile* schema: composite `@@id`, `@@map`/`@map`, jsonb, native enums, self-relation, implicit m2m, partial unique index, `Decimal`, `BigInt`, `String[]`, `@db.Timestamptz(6)`, tenant column. | the schema — it is also Phase 2's differential-suite fixture |
-| **1** | `prisma-generator-pgbase` (§14.8) + `SchemaProvider` + `pg_catalog` type resolution. | the normalized `EntitySchema` shape — everything downstream depends on it |
-| **2** | AST + `evaluate` + `compileSql` (Tier 2) + **the differential property suite**. Nothing downstream is trustworthy until this is green. (§4.1, §14.4) | operator coverage; the property-test harness |
-| **3** | `definePolicy` + registry + exhaustiveness types + sentinel probe + boot validation (incl. `FULL` + column-list refusal, §7.3). (§2, §14.3) | secure-by-default proven by test, not inspection |
-| **4** | CLS + `ClaimsBuilder` contract + claims cache + scoped writes. Server-side only, no socket. (§5.1–5.2) | the four-layer cache; single-flight |
-| **5** | **Tier 1 one-shot path** — Prisma compiler for `where`/`include`/`counts`/`orderBy`. Immediately useful on its own; this is what deletes the read endpoints. (§3, §14.4) | the AST → Prisma mapping, and the `$queryRaw` cursor |
-| **6** | WAL leader: decode → TOAST carry-forward → transform → diff → strip → publish. (§7.5, §7.6, §14.7) | assert secrets are absent from the bus payload |
-| **7** | Routing + Tier 2 live subscriptions, **per-subscription first**. Correctness before aggregation. (§6) | structured constraints; equality-bucket router |
-| **8** | Client SDK + RTK binding, sharing `evaluate` from Phase 2. (§10) | per-arg handle `Map`; canonicalization |
-| **9** | Socket-level aggregation — union predicate, unified snapshot, per-table client store, client fan-out. Differential-tested against Phase 7. (§6.2, §10.1) | the union simplifier |
-| **10** | Source invalidation + subscription rescoping. (§5.3, §5.4) | narrow vs widen paths |
-| **11** | **Adopt pgbase in Atlas** — hand-author `schema.prisma` from the 18 entities (introspect only as a cross-check), recreate the DB, and swap TypeORM + `pg-realtime` + `nestjs-rls` for Prisma + pgbase in one cutover. | see the sizing notes below |
+| Phase  | Deliverable                                                                                                                                                                                                                                                                                                                                     | Review surface                                                            |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **0**  | **Example app** — `examples/api` (NestJS) + `examples/web` (Next + RTK) + docker-compose Postgres at `wal_level=logical`, with a deliberately _hostile_ schema: composite `@@id`, `@@map`/`@map`, jsonb, native enums, self-relation, implicit m2m, partial unique index, `Decimal`, `BigInt`, `String[]`, `@db.Timestamptz(6)`, tenant column. | the schema — it is also Phase 2's differential-suite fixture              |
+| **1**  | `prisma-generator-pgbase` (§14.8) + `SchemaProvider` + `pg_catalog` type resolution.                                                                                                                                                                                                                                                            | the normalized `EntitySchema` shape — everything downstream depends on it |
+| **2**  | AST + `evaluate` + `compileSql` (Tier 2) + **the differential property suite**. Nothing downstream is trustworthy until this is green. (§4.1, §14.4)                                                                                                                                                                                            | operator coverage; the property-test harness                              |
+| **3**  | `definePolicy` + registry + exhaustiveness types + sentinel probe + boot validation (incl. `FULL` + column-list refusal, §7.3). (§2, §14.3)                                                                                                                                                                                                     | secure-by-default proven by test, not inspection                          |
+| **4**  | CLS + `ClaimsBuilder` contract + claims cache + scoped writes. Server-side only, no socket. (§5.1–5.2)                                                                                                                                                                                                                                          | the four-layer cache; single-flight                                       |
+| **5**  | **Tier 1 one-shot path** — Prisma compiler for `where`/`include`/`counts`/`orderBy`. Immediately useful on its own; this is what deletes the read endpoints. (§3, §14.4)                                                                                                                                                                        | the AST → Prisma mapping, and the `$queryRaw` cursor                      |
+| **6**  | WAL leader: decode → TOAST carry-forward → transform → diff → strip → publish. (§7.5, §7.6, §14.7)                                                                                                                                                                                                                                              | assert secrets are absent from the bus payload                            |
+| **7**  | Routing + Tier 2 live subscriptions, **per-subscription first**. Correctness before aggregation. (§6)                                                                                                                                                                                                                                           | structured constraints; equality-bucket router                            |
+| **8**  | Client SDK + RTK binding, sharing `evaluate` from Phase 2. (§10)                                                                                                                                                                                                                                                                                | per-arg handle `Map`; canonicalization                                    |
+| **9**  | Socket-level aggregation — union predicate, unified snapshot, per-table client store, client fan-out. Differential-tested against Phase 7. (§6.2, §10.1)                                                                                                                                                                                        | the union simplifier                                                      |
+| **10** | Source invalidation + subscription rescoping. (§5.3, §5.4)                                                                                                                                                                                                                                                                                      | narrow vs widen paths                                                     |
+| **11** | **Adopt pgbase in Atlas** — hand-author `schema.prisma` from the 18 entities (introspect only as a cross-check), recreate the DB, and swap TypeORM + `pg-realtime` + `nestjs-rls` for Prisma + pgbase in one cutover.                                                                                                                           | see the sizing notes below                                                |
 
 Open items §12 items 4–6 land in Phase 9; items 7–9 remain deferred.
 
@@ -1428,11 +1446,8 @@ The operator surface is reassuringly tiny: `In` ×3, `Not` ×1, `LessThan` ×1, 
 `IsNull`/`MoreThan`/`Between`/`ILike`/`Raw` anywhere in active code.
 
 Custom constraint naming (`pk_x`, `fk_x_y_z`, `idx_x_y`) has no Prisma equivalent — moot, because
-the dev DB is recreated from scratch rather than introspected.
-10. **Pinned-cursor pagination + journal.** (§8)
-11. **Backpressure + resync:** bounded queues, large-transaction threshold, jittered reconnect.
-    (§7.5, §7.6.1)
-12. *Follow-up:* same-snapshot consistency across a socket's subscriptions. (§9)
+the dev DB is recreated from scratch rather than introspected. 10. **Pinned-cursor pagination + journal.** (§8) 11. **Backpressure + resync:** bounded queues, large-transaction threshold, jittered reconnect.
+(§7.5, §7.6.1) 12. _Follow-up:_ same-snapshot consistency across a socket's subscriptions. (§9)
 
 ### Maintainability rules for the build
 

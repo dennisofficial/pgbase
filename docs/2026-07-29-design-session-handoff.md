@@ -9,30 +9,30 @@
 
 Dennis is building a **new git submodule package**, `@workspace/nestjs-database`: one package owning
 TypeORM + entity registry + RLS + CLS + WAL/CDC engine + query compiler + socket gateway + client
-SDK, for a NestJS/Postgres stack. The pattern is **CQS** — backend writes *only* mutation endpoints;
+SDK, for a NestJS/Postgres stack. The pattern is **CQS** — backend writes _only_ mutation endpoints;
 clients read via a typed SDK over a websocket, inside an RLS envelope they can't influence.
 
 It replaces two existing submodules (`pg-realtime`, `nestjs-rls`). **It is a from-scratch rewrite** —
-those are reference material for patterns, explicitly *not* code to port. Dennis said this directly.
+those are reference material for patterns, explicitly _not_ code to port. Dennis said this directly.
 
 He built a Mongo analogue before: `github.com/dennisofficial/nestjs-realtime-mongo` (abandoned,
 public). It put `FilterQuery<T>` straight on the wire — which worked because in Mongo the query
-language *is* the matcher language. That symmetry is the thing Postgres lacks and this package must
+language _is_ the matcher language. That symmetry is the thing Postgres lacks and this package must
 manufacture.
 
 ---
 
 ## Read these, in this order
 
-| File | What it is |
-|---|---|
-| `scratch/DESIGN.md` | **The authoritative design.** 13 sections + build order + maintainability rules. Start here. |
-| `scratch/fanout.md` | Connection/fan-out map, mermaid. DB → leader → bus → servers → sockets → components, with multipliers per hop and failure/backpressure paths. |
-| `scratch/query-dsl.ts` | The AST, two interpreters, three divergence hazards, per-repo operator citations, live-vs-one-shot pagination. |
-| `scratch/claims-cache.ts` | Dev surface vs package internals, async claims builder, WAL-driven invalidation, revocation cascade. |
-| `scratch/rtk-integration.ts` | Tiering as RTK endpoints, canonicalization, dedupe layers. |
-| `scratch/option-{a,b,c}-*.ts` | Superseded by transport tiering. Kept for the reasoning trail. |
-| `scratch/scratch1.ts` | Dennis's original 30-min DX sketch. Contains one real bug — see below. |
+| File                          | What it is                                                                                                                                    |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scratch/DESIGN.md`           | **The authoritative design.** 13 sections + build order + maintainability rules. Start here.                                                  |
+| `scratch/fanout.md`           | Connection/fan-out map, mermaid. DB → leader → bus → servers → sockets → components, with multipliers per hop and failure/backpressure paths. |
+| `scratch/query-dsl.ts`        | The AST, two interpreters, three divergence hazards, per-repo operator citations, live-vs-one-shot pagination.                                |
+| `scratch/claims-cache.ts`     | Dev surface vs package internals, async claims builder, WAL-driven invalidation, revocation cascade.                                          |
+| `scratch/rtk-integration.ts`  | Tiering as RTK endpoints, canonicalization, dedupe layers.                                                                                    |
+| `scratch/option-{a,b,c}-*.ts` | Superseded by transport tiering. Kept for the reasoning trail.                                                                                |
+| `scratch/scratch1.ts`         | Dennis's original 30-min DX sketch. Contains one real bug — see below.                                                                        |
 
 ---
 
@@ -46,27 +46,27 @@ manufacture.
    `@Realtime` (every table is realtime — Dennis: "that's the future"), no `@Queryable` unless Tier
    3 materializes.
 3. **Secure by default.** Missing `@Rls` ⇒ deny all client access. Missing `@RlsTransform` ⇒ not
-   queryable. Column absent from transform output ⇒ never returned *and never filterable*.
+   queryable. Column absent from transform output ⇒ never returned _and never filterable_.
 4. **Sentinel probe** at boot derives the filterable-column allowlist + column→view-field map from
    each transform. Closes a filter-oracle leak created by dropping `@Expose`.
 5. **One AST, two interpreters** (`compile`→SQL, `evaluate`→in-memory), with a differential property
    suite against a real Postgres as the load-bearing correctness guarantee.
 6. **Object-literal queries, never strings.** Learned from `postgrest-js`, which pays for a full
-   parser *inside the TS type system* because their query language is a string.
+   parser _inside the TS type system_ because their query language is a string.
 7. **Claims: dev owns caching, package owns invalidation.** `build()` + `sources` on one injectable
    class; `invalidate()` optional (only needed for process-local caches).
 8. **Compiler emits structured constraints** (`equalities`/`ranges`/`residual`/`evaluate`), so the
    router is swappable. Equality-bucket router for v1.
 9. **The unit of server work is the socket, not the subscription** (§6.2) — union predicate, one
    snapshot per socket per table, client fans out.
-10. **Transform runs at the leader**, once globally; the bus carries the *view*, not the raw row, so
+10. **Transform runs at the leader**, once globally; the bus carries the _view_, not the raw row, so
     secrets never leave the leader process.
 11. **Q4 same-snapshot consistency: yes, as a follow-up.** v1 must not foreclose it — carry LSN on
     every envelope, keep the client apply path batch-shaped.
 
 ---
 
-## Empirical findings — these were *measured*, don't re-derive
+## Empirical findings — these were _measured_, don't re-derive
 
 ### Two spikes, run on a throwaway PG 16.14 container (removed afterward; dev DB untouched)
 
@@ -74,7 +74,7 @@ manufacture.
 DDL accepts either order silently; the failure is at DML time:
 `ERROR: cannot update table "t1" / DETAIL: Column list used by the publication does not cover the
 replica identity.` It fails **even when the column list names every column**. `INSERT` still works;
-`UPDATE`/`DELETE` are blocked. Verified separately that column lists *do* work with default replica
+`UPDATE`/`DELETE` are blocked. Verified separately that column lists _do_ work with default replica
 identity — the excluded column appeared **zero times** in the decoded stream, including on an UPDATE
 that changed it. ⇒ per-table Tier A (FULL) / Tier B (column list) choice; boot validation must reject
 the combination because it renders a table unwritable. Details in `DESIGN.md` §7.3.
@@ -93,13 +93,13 @@ enough to rewrite from §7.4 if gone).
 Read-query shape, `(a)` single-table filter+sort+limit / `(b)` +relation include / `(c)` genuinely
 needs joins-aggregates:
 
-| repo | n | (a) | (b) | (c) |
-|---|---|---|---|---|
-| `cubix-infra` | 181 | **90%** | 8% | 2% |
-| `rs-crm-app` | 120 | **67%** | 27% | 6% |
-| `ortho-backend-v3` | 189 | **95%** | 0% (impossible — Firestore/Mongo) | 4% |
+| repo               | n   | (a)     | (b)                               | (c) |
+| ------------------ | --- | ------- | --------------------------------- | --- |
+| `cubix-infra`      | 181 | **90%** | 8%                                | 2%  |
+| `rs-crm-app`       | 120 | **67%** | 27%                               | 6%  |
+| `ortho-backend-v3` | 189 | **95%** | 0% (impossible — Firestore/Mongo) | 4%  |
 
-The low `(c)` numbers measure *what the stores permit*, not what the apps need — demand shows up as
+The low `(c)` numbers measure _what the stores permit_, not what the apps need — demand shows up as
 workaround scar tissue. Key citations worth keeping:
 
 - **The one join capability with real cross-repo demand: filter/sort on a relation's scalar column at
@@ -133,10 +133,10 @@ reject no-PK tables at boot; no client-supplied casts.
 
 **Convex.** Read sets are **interval sets in index-key space** per (table, index), matched by one
 shared walk of the commit log (`crates/database/src/reads.rs`, `subscription.rs`). They reject
-client-composed queries outright — *"The root problem is that we're exposing the database to the
-client, then patching that exposure with row-level rules."* **That argument is engaged directly in
+client-composed queries outright — _"The root problem is that we're exposing the database to the
+client, then patching that exposure with row-level rules."_ **That argument is engaged directly in
 `DESIGN.md` §1**: their "rules language is separate from app code" leg doesn't apply to us; their
-"client can't be trusted with the filter" leg reduces to *registry completeness*, which is why
+"client can't be trusted with the filter" leg reduces to _registry completeness_, which is why
 fail-closed-and-loud is a hard requirement.
 Stolen: one-pass routing; result-hash dedup before pushing; the query journal; pinned-cursor
 pagination with the valid-prefix invariant; same-snapshot consistency.
@@ -159,7 +159,7 @@ narrowing the read set.
 - **`ack-query.ts:67`'s `keyOf`** has this exact bug today (`JSON.stringify(arg)`) — reference
   implementation, not to be copied verbatim.
 - **Dennis's `scratch1.ts` `wrapEndpoint` has a real bug:** `const sub = client.jobs.createSubscriptionOne()`
-  runs once at module load, but RTK creates one cache entry *per distinct arg*. Two args then share
+  runs once at module load, but RTK creates one cache entry _per distinct arg_. Two args then share
   and stomp one subscription. The fix is a per-arg `Map` inside the endpoint closure (the pattern in
   `ack-query.ts:127`). His mental model (per-arg subscription, subId per cache entry, server routes
   by subId) is correct — the sketch just doesn't express it.

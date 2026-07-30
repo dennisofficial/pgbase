@@ -7,8 +7,8 @@ import type {
   LiveStringFilter,
   LiveWhere,
 } from '@workspace/pgbase/query';
-import { JobStatus } from './generated/prisma/enums.js';
 import type { Prisma } from './generated/prisma/client.js';
+import { JobStatus } from './generated/prisma/enums.js';
 
 /**
  * Compile-time proof that pgbase's wire filters are a SUBSET of Prisma's, so a `where` written

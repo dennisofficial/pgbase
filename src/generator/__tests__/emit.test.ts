@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { emitStaticSchemaModule } from '../emit.js';
-import { SCHEMA_FORMAT_VERSION } from '../../version.js';
 import type { StaticSchema } from '../../schema/types.js';
+import { SCHEMA_FORMAT_VERSION } from '../../version.js';
+import { emitStaticSchemaModule } from '../emit.js';
 
 const SCHEMA: StaticSchema = {
   formatVersion: SCHEMA_FORMAT_VERSION,

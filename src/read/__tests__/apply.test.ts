@@ -18,11 +18,7 @@ afterAll(async () => {
 describe('applyPlan — nested one-to-many, one-to-one, and null relations', () => {
   it('strips hidden fields at every level and keys relations by their request field name', async () => {
     const ctx = await buildContext(pool, REGISTRY_VISIBLE_SETTINGS);
-    const { plan } = scopeRead(
-      { include: { settings: true, tasks: true } },
-      'Job',
-      ctx,
-    );
+    const { plan } = scopeRead({ include: { settings: true, tasks: true } }, 'Job', ctx);
 
     const rawJob = {
       id: 'job-1',

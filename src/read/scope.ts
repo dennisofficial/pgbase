@@ -461,7 +461,8 @@ function withCount(
   return (row: unknown) => {
     const view = project(row);
     if (view === null || typeof view !== 'object' || Array.isArray(view)) return view;
-    const count = row && typeof row === 'object' ? (row as Record<string, unknown>)['_count'] : undefined;
+    const count =
+      row && typeof row === 'object' ? (row as Record<string, unknown>)['_count'] : undefined;
     if (count === undefined) return view;
     return { ...(view as Record<string, unknown>), _count: count };
   };

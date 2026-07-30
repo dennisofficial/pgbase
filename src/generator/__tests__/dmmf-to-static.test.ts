@@ -25,7 +25,9 @@ function scalarField(overrides: Partial<DMMF.Field> & { name: string }): DMMF.Fi
   };
 }
 
-function relationField(overrides: Partial<DMMF.Field> & { name: string; type: string }): DMMF.Field {
+function relationField(
+  overrides: Partial<DMMF.Field> & { name: string; type: string },
+): DMMF.Field {
   return {
     kind: 'object',
     isRequired: true,
@@ -202,17 +204,15 @@ describe('dmmfToStaticSchema — implicit many-to-many detection', () => {
 
     const result = dmmfToStaticSchema(datamodel([job, jobWatcher]), OPTS);
     const jobModel = result.models.find((m) => m.model === 'Job')!;
-    expect(jobModel.relations.find((r) => r.name === 'watchers')!.isImplicitManyToMany).toBe(
-      false,
-    );
+    expect(jobModel.relations.find((r) => r.name === 'watchers')!.isImplicitManyToMany).toBe(false);
   });
 });
 
 describe('dmmfToStaticSchema — misc', () => {
   it('rejects a non-postgresql provider loudly', () => {
-    expect(() =>
-      dmmfToStaticSchema(datamodel([]), { ...OPTS, activeProvider: 'mysql' }),
-    ).toThrow(/postgresql/);
+    expect(() => dmmfToStaticSchema(datamodel([]), { ...OPTS, activeProvider: 'mysql' })).toThrow(
+      /postgresql/,
+    );
   });
 
   it('de-duplicates a field carrying both isUnique and a matching @@unique entry', () => {

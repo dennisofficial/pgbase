@@ -2,8 +2,8 @@ import type { Pool } from 'pg';
 import { definePolicy } from '../../policy/define.js';
 import { NO_CLIENT_ACCESS, type PolicyEntry } from '../../policy/types.js';
 import { validatePolicies } from '../../policy/validate.js';
-import { DEFAULT_READ_LIMITS, type ReadLimits } from '../types.js';
 import type { ReadContext } from '../scope.js';
+import { DEFAULT_READ_LIMITS, type ReadLimits } from '../types.js';
 import { resolveReadFixtureSchema } from './fixtures.js';
 
 export interface Claims {

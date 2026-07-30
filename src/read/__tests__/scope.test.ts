@@ -35,18 +35,14 @@ describe('scopeRead — hidden models are unreachable', () => {
 });
 
 describe('scopeRead — RLS injected at every relation level', () => {
-  it('a nested where is ANDed with the target model\'s RLS, RLS outermost', async () => {
+  it("a nested where is ANDed with the target model's RLS, RLS outermost", async () => {
     const ctx = await buildContext(pool, REGISTRY_VISIBLE_SETTINGS);
-    const { args } = scopeRead(
-      { include: { tasks: { where: { done: true } } } },
-      'Job',
-      ctx,
-    );
+    const { args } = scopeRead({ include: { tasks: { where: { done: true } } } }, 'Job', ctx);
     const tasksArgs = includeOf(args, 'tasks');
     expect(tasksArgs.where).toEqual({ AND: [{ orgId: ORG_1 }, { done: true }] });
   });
 
-  it('the `true` shorthand still gets a `where` slot carrying the target\'s RLS', async () => {
+  it("the `true` shorthand still gets a `where` slot carrying the target's RLS", async () => {
     const ctx = await buildContext(pool, REGISTRY_VISIBLE_SETTINGS);
     const { args } = scopeRead({ include: { tasks: true } }, 'Job', ctx);
     const tasksArgs = includeOf(args, 'tasks');
@@ -55,11 +51,7 @@ describe('scopeRead — RLS injected at every relation level', () => {
 
   it('three levels deep (Org → Job → Task), each level gets its own RLS', async () => {
     const ctx = await buildContext(pool, REGISTRY_VISIBLE_SETTINGS);
-    const { args } = scopeRead(
-      { include: { jobs: { include: { tasks: true } } } },
-      'Org',
-      ctx,
-    );
+    const { args } = scopeRead({ include: { jobs: { include: { tasks: true } } } }, 'Org', ctx);
 
     expect(args.where).toEqual({ AND: [{ id: ORG_1 }, {}] });
 
@@ -102,11 +94,7 @@ describe('scopeRead — take clamped at every level', () => {
       maxRows: 5,
       statementTimeoutMs: 5_000,
     });
-    const { args } = scopeRead(
-      { take: 1_000, include: { tasks: { take: 1_000 } } },
-      'Job',
-      ctx,
-    );
+    const { args } = scopeRead({ take: 1_000, include: { tasks: { take: 1_000 } } }, 'Job', ctx);
     expect(args.take).toBe(5);
     expect(includeOf(args, 'tasks').take).toBe(5);
   });
@@ -130,9 +118,7 @@ describe('scopeRead — take clamped at every level', () => {
 describe('scopeRead — cursor validated against filterable', () => {
   it('throws when cursoring on a non-filterable field', async () => {
     const ctx = await buildContext(pool, REGISTRY_VISIBLE_SETTINGS);
-    expect(() => scopeRead({ cursor: { metadata: 'x' } }, 'Job', ctx)).toThrow(
-      ReadValidationError,
-    );
+    expect(() => scopeRead({ cursor: { metadata: 'x' } }, 'Job', ctx)).toThrow(ReadValidationError);
     expect(() => scopeRead({ cursor: { metadata: 'x' } }, 'Job', ctx)).toThrow(/metadata/);
   });
 
@@ -146,9 +132,7 @@ describe('scopeRead — cursor validated against filterable', () => {
 describe('scopeRead — unknown relation field', () => {
   it('throws naming the path', async () => {
     const ctx = await buildContext(pool, REGISTRY_VISIBLE_SETTINGS);
-    expect(() => scopeRead({ include: { bogus: true } }, 'Job', ctx)).toThrow(
-      ReadValidationError,
-    );
+    expect(() => scopeRead({ include: { bogus: true } }, 'Job', ctx)).toThrow(ReadValidationError);
     expect(() => scopeRead({ include: { bogus: true } }, 'Job', ctx)).toThrow(/bogus/);
   });
 });
@@ -156,8 +140,8 @@ describe('scopeRead — unknown relation field', () => {
 describe('scopeRead — select and include are mutually exclusive at a level', () => {
   it('throws when both are set', async () => {
     const ctx = await buildContext(pool, REGISTRY_VISIBLE_SETTINGS);
-    expect(() =>
-      scopeRead({ select: { id: true }, include: { tasks: true } }, 'Job', ctx),
-    ).toThrow(ReadValidationError);
+    expect(() => scopeRead({ select: { id: true }, include: { tasks: true } }, 'Job', ctx)).toThrow(
+      ReadValidationError,
+    );
   });
 });
