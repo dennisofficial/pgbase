@@ -39,8 +39,9 @@
 // `moduleFormat` is unset. examples/api pins `"module": "commonjs"` so `nest build` consumes the
 // output without a bundler. Consumers on ESM get ESM. pgbase must work under both.
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
 }
 
 // Prisma 7 rejects an inline `url = env(...)` here (P1012); the connection URL lives in

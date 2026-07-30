@@ -9,23 +9,50 @@
   "types": "./src/index.ts",
   "exports": {
     ".": {
-      "import": { "types": "./src/index.ts", "default": "./dist/index.mjs" },
-      "require": { "types": "./src/index.ts", "default": "./dist/index.js" }
+      "import": {
+        "types": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./src/index.ts",
+        "default": "./dist/index.js"
+      }
     },
     "./nest": {
-      "import": { "types": "./src/nest/index.ts", "default": "./dist/nest/index.mjs" },
-      "require": { "types": "./src/nest/index.ts", "default": "./dist/nest/index.js" }
+      "import": {
+        "types": "./src/nest/index.ts",
+        "default": "./dist/nest/index.mjs"
+      },
+      "require": {
+        "types": "./src/nest/index.ts",
+        "default": "./dist/nest/index.js"
+      }
     },
     "./client": {
-      "import": { "types": "./src/client/index.ts", "default": "./dist/client/index.mjs" },
-      "require": { "types": "./src/client/index.ts", "default": "./dist/client/index.js" }
+      "import": {
+        "types": "./src/client/index.ts",
+        "default": "./dist/client/index.mjs"
+      },
+      "require": {
+        "types": "./src/client/index.ts",
+        "default": "./dist/client/index.js"
+      }
     },
     "./react": {
-      "import": { "types": "./src/react/index.ts", "default": "./dist/react/index.mjs" },
-      "require": { "types": "./src/react/index.ts", "default": "./dist/react/index.js" }
+      "import": {
+        "types": "./src/react/index.ts",
+        "default": "./dist/react/index.mjs"
+      },
+      "require": {
+        "types": "./src/react/index.ts",
+        "default": "./dist/react/index.js"
+      }
     }
   },
-  "files": ["dist", "src"],
+  "files": [
+    "dist",
+    "src"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "nodemon",
@@ -45,19 +72,31 @@
   "peerDependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
-    "@prisma/client": "^6.0.0",
+    "@prisma/client": "^7.0.0",
     "@reduxjs/toolkit": "^2.0.0",
     "react": "^19.0.0",
     "socket.io": "^4.8.0",
     "socket.io-client": "^4.8.0"
   },
   "peerDependenciesMeta": {
-    "@nestjs/common": { "optional": true },
-    "@nestjs/core": { "optional": true },
-    "@reduxjs/toolkit": { "optional": true },
-    "react": { "optional": true },
-    "socket.io": { "optional": true },
-    "socket.io-client": { "optional": true }
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@nestjs/core": {
+      "optional": true
+    },
+    "@reduxjs/toolkit": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "socket.io": {
+      "optional": true
+    },
+    "socket.io-client": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
