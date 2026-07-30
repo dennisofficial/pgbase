@@ -31,13 +31,11 @@
 // Partial unique indexes (Prisma cannot express these in-schema) are appended as raw SQL to the
 // initial migration.
 
-// The modern TS generator, not the legacy `prisma-client-js`. We never read `Prisma.dmmf` (it is
-// absent here and gutted there — see docs/DESIGN.md §14.8), so the client generator is free to be
-// the current default.
+// The modern TS generator, not the legacy `prisma-client-js`. We never read `Prisma.dmmf` (see
+// docs/DESIGN.md §14.8), so the client generator is free to be the current default.
 //
-// NOTE: this generator picks ESM vs CJS from the nearest tsconfig's `compilerOptions.module` when
-// `moduleFormat` is unset. examples/api pins `"module": "commonjs"` so `nest build` consumes the
-// output without a bundler. Consumers on ESM get ESM. pgbase must work under both.
+// `moduleFormat` is set explicitly: left unset it is inferred from the nearest tsconfig's
+// `compilerOptions.module`. Consumers may pick either — pgbase must work under both.
 generator client {
   provider     = "prisma-client"
   output       = "../src/generated/prisma"

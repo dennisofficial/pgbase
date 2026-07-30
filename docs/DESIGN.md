@@ -1197,6 +1197,36 @@ come from `pg_catalog`.
 Prisma 7 rejects an inline `datasource { url = env(...) }` (`P1012`); the connection URL moved to
 `prisma.config.ts` via `defineConfig({ datasource: { url } })`. Affects anyone coming from Prisma 6.
 
+### Prisma Next evaluated and rejected for now — measured 2026-07-30
+
+`prisma-next` 0.16.0 promises exactly what §14.8 wants: a schema compiled to "a deterministic JSON
+contract," emitted once and committed. Spiked against this repo's own fixture. **Verdict: NOT YET.**
+
+Disqualifying on its own: **it cannot read a multi-file schema.** `@prisma-next/sql-contract-psl`
+hardcodes a single input (`inputs: [schemaPath]`, `resolvedInputs[0]`) with no import or globbing
+mechanism. The fixture's five files had to be concatenated by hand.
+
+Three further blockers:
+
+- **The filter grammar is not a serializable tree.** `.where()` takes `(fields, fns) =>
+  Expression<Boolean>` — an executable closure AST. The plain-object shorthand is flat,
+  equality-only, implicitly ANDed, no per-field operators, no nesting. §14.9's vocabulary decision
+  rests on v7's `where` being a nestable JSON tree; none of this can serve that role.
+- **`@prisma-next/contract`** — the package we would import — is banner-marked *"Internal package…
+  Do not depend on this package directly."*
+- **38 breaking changes across 5 minors in ~2 months**, and 0.16.0 changed `contract.json`'s own
+  shape (`foreignKeys[]`/`indexes[]` split). Also: implicit m2m cannot be authored at all, `@db.*`
+  cannot be inline (must be hoisted to a `types{}` alias), and a bare `enum{}` compiles to `text` +
+  a CHECK constraint rather than a native Postgres enum.
+
+**Two findings kept.** First, Prisma Next's architecture *endorses* the §14.8 decision — its
+metadata artifact bundles to 59 KB with zero WASM, against `getDMMF()`'s 3.5 MB + 2.8 MB WASM. The
+static-emitted-artifact shape is right; we just emit it ourselves. Second, `@prisma-next/driver-
+postgres` takes `{ kind: 'pgPool', pool }` — a user-supplied `pg.Pool` — so §14.2's pooling
+argument holds across both lines.
+
+Revisit on a stated stability commitment (1.0, or a documented contract-schema guarantee).
+
 ## 14.9 Amends §4.2 / §4.3 — one vocabulary, two surfaces
 
 §4.2 invents a Mongo-style operator set (`$eq`, `$in`, `$ilike`, …). **Drop it.** It is a third
