@@ -1,0 +1,54 @@
+// pgbase example schema — deliberately HOSTILE, and deliberately MULTI-FILE.
+//
+// This is not a realistic app schema. Every model exists to exercise a metadata or query feature
+// that pgbase must handle, and several exist specifically because they are known to be awkward.
+// It doubles as the fixture for the differential property suite (docs/DESIGN.md §4.1), so
+// anything the suite must prove correct needs a column here to prove it against.
+//
+// It is split across `models/` on purpose. Folder schemas are GA in Prisma 7 and are what Prisma
+// itself recommends, so consumers will use them — which means pgbase's generator plugin and
+// SchemaProvider must be exercised against one. A single-file fixture would ship that path
+// untested. Generator and datasource blocks must stay in THIS file: Prisma requires them at the
+// root of the configured schema directory, alongside `migrations/`.
+//
+// Coverage checklist — keep this honest when editing:
+//   @@map / @map ................. models/tenancy.prisma, models/job.prisma, …
+//   composite @@id ............... Membership, JobWatcher
+//   PK that is also an FK ........ JobSettings (1:1 companion table)
+//   self-relation ................ Thread.parent
+//   implicit many-to-many ........ Job <-> Tag  (join table is invisible to the DMMF — §14.8)
+//   explicit m2m via join model .. Job <-> User via JobWatcher
+//   native enum .................. JobStatus, MemberRole
+//   jsonb + literal default ...... Job.metadata, Task.blockedBy
+//   scalar list .................. Job.labels
+//   Decimal / BigInt ............. Invoice.amount / Invoice.externalRef
+//   @db.Timestamptz(6) ........... every timestamp, because µs-vs-ms is divergence hazard #1
+//   case-sensitivity trap ........ User.email (NOT citext — see the note there)
+//   nullable everything .......... Job.closedAt, Thread.parentId — three-valued-logic hazard #3
+//   tenant column ................ orgId on every client-readable model, so RLS is exercisable
+//   NON-tenant model ............. AuditLog has no orgId — proves the router's wildcard bucket
+//
+// Partial unique indexes (Prisma cannot express these in-schema) are appended as raw SQL to the
+// initial migration.
+
+// The modern TS generator, not the legacy `prisma-client-js`. We never read `Prisma.dmmf` (it is
+// absent here and gutted there — see docs/DESIGN.md §14.8), so the client generator is free to be
+// the current default.
+//
+// NOTE: this generator picks ESM vs CJS from the nearest tsconfig's `compilerOptions.module` when
+// `moduleFormat` is unset. examples/api pins `"module": "commonjs"` so `nest build` consumes the
+// output without a bundler. Consumers on ESM get ESM. pgbase must work under both.
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Prisma 7 rejects an inline `url = env(...)` here (P1012); the connection URL lives in
+// prisma.config.ts via defineConfig({ datasource: { url } }).
+//
+// Also note: the `prisma-client` generator is DRIVER-ADAPTER-ONLY for Postgres in Prisma 7 —
+// there is no bundled query engine, and `new PrismaClient({ adapter })` is required, not
+// optional. pgbase can therefore rely on the consumer already owning a `pg` Pool (§14.2).
+datasource db {
+  provider = "postgresql"
+}

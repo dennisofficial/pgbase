@@ -1,0 +1,75 @@
+# Dev Postgres for the example app and the test suites.
+#
+# wal_level=logical is NOT optional — it is what makes logical decoding possible at all, and it
+# requires a server restart, so it is set here rather than at runtime (docs/DESIGN.md §7.5).
+services:
+  postgres:
+    image: postgres:16
+    container_name: pgbase-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pgbase
+      POSTGRES_PASSWORD: pgbase
+      POSTGRES_DB: pgbase
+    ports:
+      - '55432:5432'
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      # One slot + sender for the leader, plus headroom for a second during a rolling restart and
+      # for throwaway slots in tests. A slot admits exactly one consumer (§7.5).
+      - -c
+      - max_replication_slots=8
+      - -c
+      - max_wal_senders=8
+      # PG 14+. Lets in-progress transactions stream incrementally instead of buffering whole
+      # transactions in the leader. Neither pg-logical-replication nor pulse-cdc-pg decodes
+      # STREAM_* messages yet (§14.7), but the server side costs nothing to enable now.
+      - -c
+      - logical_decoding_work_mem=64MB
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pgbase -d pgbase']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pgbase-pgdata:/var/lib/postgresql/data
+
+  # Separate database for the differential property suite (§4.1), which creates and drops tables
+  # freely. Kept off the dev DB on purpose — a shared test DB has truncated a live dev database
+  # before, and that is not a mistake worth repeating.
+  postgres-test:
+    image: postgres:16
+    container_name: pgbase-postgres-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pgbase
+      POSTGRES_PASSWORD: pgbase
+      POSTGRES_DB: pgbase_test
+    ports:
+      - '55433:5432'
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=16
+      - -c
+      - max_wal_senders=16
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U pgbase -d pgbase_test']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data
+
+volumes:
+  pgbase-pgdata:

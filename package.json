@@ -32,7 +32,11 @@
     "prepare": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "example:up": "docker compose up -d",
+    "example:down": "docker compose down",
+    "example:api": "pnpm --filter @pgbase-example/api dev",
+    "example:web": "pnpm --filter @pgbase-example/web dev"
   },
   "dependencies": {
     "pg": "^8.13.1",

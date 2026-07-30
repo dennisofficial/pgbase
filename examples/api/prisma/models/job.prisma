@@ -1,0 +1,94 @@
+// The main workload cluster — the models most live subscriptions target.
+
+model Job {
+  id        String       @id @default(uuid()) @db.Uuid
+  orgId     String       @map("org_id") @db.Uuid
+  name      String
+  status    JobStatus    @default(QUEUED)
+  priority  Int          @default(0)
+  /// Scalar list — a real Postgres text[]. `has` / `hasSome` must agree between the compiled SQL
+  /// and the in-memory evaluator.
+  labels    String[]     @default([])
+  /// jsonb with a PLAIN LITERAL default. Function defaults re-emit on every migrate; never use one.
+  metadata  Json         @default("{}")
+  /// Nullable on purpose: `status != 'DONE'` must not include these rows in JS while excluding
+  /// them in SQL (divergence hazard #3 — the NULL-lifting rewrite is what fixes it).
+  closedAt  DateTime?    @map("closed_at") @db.Timestamptz(6)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  org       Org          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  settings  JobSettings?
+  tasks     Task[]
+  watchers  JobWatcher[]
+  /// Implicit m2m. Prisma hides the join table (`_JobToTag`) from the DMMF entirely, so its
+  /// physical shape has to come from pg_catalog (§14.8).
+  tags      Tag[]
+
+  @@index([orgId, status])
+  @@index([orgId, createdAt])
+  @@map("jobs")
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+
+  @@map("job_status")
+}
+
+/// 1:1 companion table whose primary key IS its foreign key. The DMMF reports `isId` on a
+/// relation scalar here, which is the shape that breaks naive registry builders.
+model JobSettings {
+  jobId         String @id @map("job_id") @db.Uuid
+  concurrency   Int    @default(1)
+  /// Must NEVER appear in a transform output, so the sentinel probe (§2) can prove a non-view
+  /// column is neither returned NOR filterable. If `webhookSecret` is ever filterable, the
+  /// `{ startsWith: 'a' }` oracle extracts it one character at a time.
+  webhookSecret String @map("webhook_secret")
+
+  job           Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("job_settings")
+}
+
+model Task {
+  id        String   @id @default(uuid()) @db.Uuid
+  orgId     String   @map("org_id") @db.Uuid
+  jobId     String   @map("job_id") @db.Uuid
+  title     String
+  done      Boolean  @default(false)
+  /// Array-of-ids stored as jsonb rather than a Postgres array — Atlas does this today, so the
+  /// registry must not assume `Json` always means an object.
+  blockedBy Json     @default("[]") @map("blocked_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, jobId])
+  @@map("tasks")
+}
+
+/// Explicit m2m through a join model, as opposed to Job<->Tag's implicit one. Both shapes must
+/// resolve, because Tier 1 `include` has to traverse either.
+model JobWatcher {
+  jobId    String    @map("job_id") @db.Uuid
+  userId   String    @map("user_id") @db.Uuid
+  notifyAt DateTime? @map("notify_at") @db.Timestamptz(6)
+
+  job      Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, userId])
+  @@map("job_watchers")
+}
+
+model Tag {
+  id   String @id @default(uuid()) @db.Uuid
+  name String @unique
+  jobs Job[]
+
+  @@map("tags")
+}

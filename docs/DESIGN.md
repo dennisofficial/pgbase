@@ -955,15 +955,38 @@ storage limitation §4.2 criticizes Supabase for, and the reason both reference 
 snapshot path and the `pg_catalog` probes. One pool, one connection budget. With TypeORM this
 means reaching into `dataSource.driver.master` or running two pools.
 
+> **Verified 2026-07-29, and stronger than stated.** In Prisma 7 the `prisma-client` generator is
+> **driver-adapter-only** for Postgres — the Rust query engine is gone, and `adapter` is a
+> *required* constructor argument, not an option. So this is not a Prisma capability we hope
+> consumers opt into; it is the only way a Prisma 7 Postgres app can exist. pgbase can therefore
+> **require** a `pg.Pool` at the seam and know the consumer already has one, rather than
+> defensively constructing a second pool.
+
 Secondary: Prisma migrate removes both recurring TypeORM-generator irritations (the jsonb
 fn-default re-emit loop; the HNSW prune step).
 
 ### What this costs, stated plainly
 
-- **Co-location dies.** `@Rls`/`@RlsTransform` on the entity class becomes a policy file next to
-  the model's service. §2's substantive claim — *the transform is the schema contract* — survives
-  intact; *it sits on the entity* does not. This is the design's stated ergonomic center and the
-  real price of the switch.
+- **Co-location dies — partially recovered, not fixed.** `@Rls`/`@RlsTransform` on the entity class
+  becomes a policy file next to the model's service. §2's substantive claim — *the transform is the
+  schema contract* — survives intact; *it sits on the entity* does not. This is the design's stated
+  ergonomic center and the real price of the switch.
+
+  **Multi-file schemas soften it.** Folder schemas are GA in Prisma 7 (configured by pointing
+  `schema` at a directory in `prisma.config.ts`; generator and datasource blocks must live in that
+  directory's root `schema.prisma`, with `migrations/` alongside). So a model gets its own
+  `prisma/models/job.prisma` beside `src/job/job.policy.ts` rather than a line in one monolith.
+  That is two locations instead of TypeORM's one, which is better than five hundred lines instead
+  of one — but it is a mitigation, not a fix, and should not be sold as one.
+
+  Two things follow. First, the example app uses a folder schema **deliberately**: consumers will,
+  so the generator plugin and `SchemaProvider` must be exercised against that layout or we ship it
+  untested. Second, a trap worth knowing — if `schema` is left unset, Prisma silently loads only
+  `prisma/schema.prisma` and ignores every model under it, and **`prisma validate` still reports
+  success**. That is how an empty schema ships.
+
+  Residual cost: the DMMF carries no source-file provenance, so boot validation can name the model
+  (`no policy registered for Job`) but not the file it was declared in.
 - **Row-value keyset cursors need `$queryRaw`.** Prisma has no native `(a, b) < ($1, $2)`. Same
   escape-hatch class as TypeORM's `Raw()` today; one bounded piece of the Tier 1 compiler.
 - **Prisma is the less boring bet.** The query-compiler / TS-client transition is in motion.
@@ -1104,13 +1127,67 @@ optional.
 
 `pulse-cdc-pg` has zero Prisma dependency and does not bear on §14.2 either way.
 
-## 14.8 Gate before Phase 1
+## 14.8 SPIKE RESOLVED — how schema metadata is actually obtained
 
-**Verify runtime DMMF access** under the chosen generator: `datamodel.models[].fields[]` with
-`relationFromFields` / `relationToFields` / `isId` / `type`. `Prisma.dmmf` has been semi-internal
-and its exposure shifted with the newer TS client; the fallback is `getDmmf()` from
-`@prisma/internals` parsing `schema.prisma` at boot. ~30 minutes. This gates `SchemaProvider` and
-therefore everything downstream.
+**Run 2026-07-29 against Prisma 7.9.1 on a throwaway PG 16 container. Verdict: NOT BLOCKING, but
+the obvious route is dead and the design changes because of it.**
+
+### `Prisma.dmmf` is not usable
+
+| Route | Result |
+|---|---|
+| `Prisma.dmmf`, new `prisma-client` generator (the default) | **absent entirely** — `'dmmf' in Prisma` is `false` |
+| `Prisma.dmmf`, legacy `prisma-client-js` | present but **gutted**: no `nativeType`, no `isId`/`isList`/`isRequired`/`isUnique`, no `relationFromFields`/`relationToFields`, no composite `@@id`, no `uniqueFields`, and **enums come back as an empty array** |
+| `getDMMF()` from `@prisma/internals`, parsing schema text | **complete** — every field above present, incl. `nativeType: ["Timestamptz",["6"]]` and correctly-resolved self-relations |
+
+The client-side `Prisma.dmmf` has been progressively thinned across releases for bundle-size
+reasons (prisma/prisma#13811, #27349). Building on it is a bet against a documented trend, not a
+one-off gap.
+
+### `getDMMF()` works but must not be a runtime dependency
+
+It needs no DB connection and no generated client — it parses `schema.prisma` text. But:
+
+- **3.5 MB of JS plus a 2.8 MB WASM schema parser** (`prisma_schema_build_bg.wasm`), loaded by a
+  runtime `fs.readFileSync` relative to `__dirname` that bundlers do not inline. The naive esbuild
+  output dies with `ENOENT: … prisma_schema_build_bg.wasm` until the WASM is copied alongside.
+- `@prisma/internals` ships the literal description *"This package is intended for Prisma's
+  internal use."*
+
+### Decision: a custom Prisma generator, not a boot-time call
+
+**This amends §14.6.** `SchemaProvider` is not built by calling `getDMMF()` at boot. pgbase ships a
+**Prisma generator plugin**:
+
+```
+prisma generate
+  └─ prisma-generator-pgbase   ← receives the full, rich DMMF via onGenerate({ dmmf })
+       └─ emits a static, typed EntitySchema[] into the consumer's source tree
+```
+
+Runtime then imports a plain generated module. Consequences, all good:
+
+- **Zero `@prisma/internals` at runtime**, zero WASM, bundles anywhere.
+- The internal-API exposure moves from production runtime to build time, where a Prisma bump fails
+  loudly at `prisma generate` instead of silently at boot.
+- It is the same DMMF object `getDMMF()` returns — this is the route the codegen ecosystem
+  converged on for #27349.
+- **Natural home for the §14.3 registry types.** The generator can emit the `Prisma.ModelName`-keyed
+  `PolicyFor<M>` scaffolding alongside the schema, so exhaustiveness is generated rather than
+  hand-maintained.
+
+Cost: consumers add a generator block to `schema.prisma` and re-run `prisma generate` on schema
+change. That is ordinary Prisma workflow.
+
+Unchanged from §14.6: **physical `pg_type` OIDs still come from `pg_catalog` at boot**, not from
+the DMMF. Newly known: the **implicit many-to-many join table** (`_BookToAuthor`) appears in no
+DMMF variant at all — it is a schema-level concept Prisma hides — so its physical shape must also
+come from `pg_catalog`.
+
+### Incidental finding
+
+Prisma 7 rejects an inline `datasource { url = env(...) }` (`P1012`); the connection URL moved to
+`prisma.config.ts` via `defineConfig({ datasource: { url } })`. Affects anyone coming from Prisma 6.
 
 ## 14.9 Amends §4.2 / §4.3 — one vocabulary, two surfaces
 
@@ -1210,10 +1287,18 @@ Their genuinely good ideas are already stolen in §11. Take those; not the trans
 Each phase is a reviewable unit that leaves the tree green. Phases 1–5 involve no WAL and no
 sockets.
 
+**Atlas is NOT the development target and does not move until the end.** pgbase is built against
+its own example app; Atlas stays on TypeORM + `pg-realtime`, fully working, and migrates once in
+Phase 11. The alternative — migrating Atlas first — was investigated and rejected: `pg-realtime`
+reads live TypeORM `EntityMetadata` at runtime (`build-realtime-models.ts` walks
+`dataSource.entityMetadatas` for table names, column maps, and PKs), so removing TypeORM before
+pgbase can replace it leaves the realtime engine unable to start. Deferring the migration avoids
+both a broken middle state and a throwaway port of that metadata layer.
+
 | Phase | Deliverable | Review surface |
 |---|---|---|
-| **0** | Atlas → Prisma. Introspect live DB → `schema.prisma`, baseline as one migration, rewrite the 28 `Db` call sites onto a thin throwaway wrapper. | schema fidelity vs the 18 entities; diff of the 28 sites |
-| **1** | Package scaffold + DMMF spike (§14.8) + `SchemaProvider` + `pg_catalog` type resolution. | the normalized `EntitySchema` shape — everything downstream depends on it |
+| **0** | **Example app** — `examples/api` (NestJS) + `examples/web` (Next + RTK) + docker-compose Postgres at `wal_level=logical`, with a deliberately *hostile* schema: composite `@@id`, `@@map`/`@map`, jsonb, native enums, self-relation, implicit m2m, partial unique index, `Decimal`, `BigInt`, `String[]`, `@db.Timestamptz(6)`, tenant column. | the schema — it is also Phase 2's differential-suite fixture |
+| **1** | `prisma-generator-pgbase` (§14.8) + `SchemaProvider` + `pg_catalog` type resolution. | the normalized `EntitySchema` shape — everything downstream depends on it |
 | **2** | AST + `evaluate` + `compileSql` (Tier 2) + **the differential property suite**. Nothing downstream is trustworthy until this is green. (§4.1, §14.4) | operator coverage; the property-test harness |
 | **3** | `definePolicy` + registry + exhaustiveness types + sentinel probe + boot validation (incl. `FULL` + column-list refusal, §7.3). (§2, §14.3) | secure-by-default proven by test, not inspection |
 | **4** | CLS + `ClaimsBuilder` contract + claims cache + scoped writes. Server-side only, no socket. (§5.1–5.2) | the four-layer cache; single-flight |
@@ -1223,8 +1308,36 @@ sockets.
 | **8** | Client SDK + RTK binding, sharing `evaluate` from Phase 2. (§10) | per-arg handle `Map`; canonicalization |
 | **9** | Socket-level aggregation — union predicate, unified snapshot, per-table client store, client fan-out. Differential-tested against Phase 7. (§6.2, §10.1) | the union simplifier |
 | **10** | Source invalidation + subscription rescoping. (§5.3, §5.4) | narrow vs widen paths |
+| **11** | **Adopt pgbase in Atlas** — hand-author `schema.prisma` from the 18 entities (introspect only as a cross-check), recreate the DB, and swap TypeORM + `pg-realtime` + `nestjs-rls` for Prisma + pgbase in one cutover. | see the sizing notes below |
 
 Open items §12 items 4–6 land in Phase 9; items 7–9 remain deferred.
+
+### Phase 11 sizing, measured 2026-07-29
+
+Correcting an earlier under-estimate. Atlas's data access is **not** funnelled through one seam:
+29 `Db.scoped`/`unsafe` sites (17 trivial / 4 relation / 8 hard) **plus ~19 services injecting
+custom `XRepo extends Repository<Entity>` tokens** that bypass `Db` entirely. (`InjectRepository`
+greps to zero, which is what made the first reading look smaller than it is.) Realistic: 2–3 days.
+
+The hard parts, specifically:
+
+- **7 `.manager.transaction()` sites.** `job-bootstrap` spans Job + ThreadGroup + Thread +
+  InboundMessage in one commit; "never a job without its trigger message" depends on that atomicity.
+- **3 `createQueryBuilder` sites using jsonb `->>`** — `$queryRaw` rewrites.
+- **`REPLICA IDENTITY FULL` on 10 tables**, applied by two raw-SQL migrations, with no Prisma-schema
+  representation. Permanent hand-written SQL, and nothing warns if a later migrate reverts it — the
+  §7.3 boot check from Phase 3 is what catches that.
+- **Two partial unique indexes** on `agent_credentials` with raw SQL predicates. Prisma cannot
+  express partial indexes in-schema.
+- **Two parallel config surfaces** (`backend/cli/data-source.ts`, `_lib/database/database.module.ts`)
+  plus 5 seed files on raw `DataSource`/`getRepository`. They move together or `db:seed`/`db:migrate`
+  break.
+
+The operator surface is reassuringly tiny: `In` ×3, `Not` ×1, `LessThan` ×1, and zero uses of
+`IsNull`/`MoreThan`/`Between`/`ILike`/`Raw` anywhere in active code.
+
+Custom constraint naming (`pk_x`, `fk_x_y_z`, `idx_x_y`) has no Prisma equivalent — moot, because
+the dev DB is recreated from scratch rather than introspected.
 10. **Pinned-cursor pagination + journal.** (§8)
 11. **Backpressure + resync:** bounded queues, large-transaction threshold, jittered reconnect.
     (§7.5, §7.6.1)

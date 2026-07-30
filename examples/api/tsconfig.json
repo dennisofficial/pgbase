@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": false,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "target": "ES2023",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  // `module: commonjs` here is load-bearing, not just style: the `prisma-client` generator reads
+  // this file to decide the generated client's module format when `moduleFormat` isn't set in
+  // schema.prisma (it isn't, and the schema is not ours to edit). CommonJS keeps the generated
+  // client's imports extension-less and free of `import.meta.url`, which is what lets a plain
+  // `nest build` (tsc, no bundler) consume it without also having to make this whole app ESM.
+  "include": ["src", "prisma.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}
