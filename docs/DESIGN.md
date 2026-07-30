@@ -900,15 +900,21 @@ no WAL and no sockets at all.
 
 ---
 
-# 14. Amendment — Prisma, and where the ORM boundary sits
+# 14. Amendment — Prisma, the ORM boundary, and the name
 
 > Added 2026-07-29, after the original session. **This section supersedes parts of §2, §4.1,
-> §7.5/§7.6 and §13.** Everything not explicitly amended here still stands.
+> §4.2/§4.3, §7.5/§7.6 and §13.** Everything not explicitly amended here still stands.
 
 The original design assumed TypeORM throughout ("One package owning everything database-shaped
 for a NestJS + Postgres + TypeORM app", §1). That assumption is now reversed: **the package is
 Prisma-first.** This section states why, what it changes, and what it deliberately does *not*
 abstract.
+
+**The name is `pgbase`** (`@workspace/pgbase`, `dennisofficial/pgbase`), not
+`@workspace/nestjs-database` as written throughout §1–13. Read every occurrence of the old name as
+this one. The rename reflects that this is a server *and* client package — a self-hosted Postgres
+BaaS — rather than a NestJS-only library; the framework bindings live behind subpath exports
+(`/nest`, `/client`, `/react`) instead of in the name.
 
 ## 14.1 Why the switch is affordable
 
@@ -1022,7 +1028,8 @@ tiers have different needs and §3 already separates them.
 | **2** live | SQL text + params | `pg.Pool` | snapshot is `SELECT … WHERE <union> LIMIT n`; rows are column bags fed straight to the transform. §7.6 explicitly wants no hydration, so there is nothing for an ORM to do. |
 
 The developer writes neither. Both are outputs of the package's compiler; clients still send
-object-literal ASTs (§4.3 unchanged).
+object literals, never strings. **The wire vocabulary for both tiers is Prisma's own operator
+names — see §14.9, which replaces §4.2's Mongo-style `$eq`/`$in`/`$ilike` set.**
 
 **Consequence worth banking: `evaluate` only ever runs on Tier 2 predicates.** Tier 2 is
 own-columns-only by definition (§3), so §4.1's differential property suite — the load-bearing
@@ -1105,7 +1112,100 @@ and its exposure shifted with the newer TS client; the fallback is `getDmmf()` f
 `@prisma/internals` parsing `schema.prisma` at boot. ~30 minutes. This gates `SchemaProvider` and
 therefore everything downstream.
 
-## 14.9 Amends §13 — build order, in reviewable phases
+## 14.9 Amends §4.2 / §4.3 — one vocabulary, two surfaces
+
+§4.2 invents a Mongo-style operator set (`$eq`, `$in`, `$ilike`, …). **Drop it.** It is a third
+query vocabulary — after SQL and Prisma — that nobody on this stack already knows, and it does not
+match the ORM the package is now built on. Use **Prisma's own operator names**.
+
+The surfaces then differ by tier, but the *syntax* is identical:
+
+**Tier 1 (one-shot) takes Prisma's args directly.** There is no in-memory matcher on this path —
+it is SQL, RLS ANDs in, `statement_timeout` and a row cap bound it. The only work is narrowing the
+args to transform-derived view fields. Full expressiveness, generated autocomplete, almost no
+compiler. Given §3's survey found essentially every join-shaped demand is one-shot, this is where
+the expressiveness win actually lands.
+
+**Tier 2 (live) takes a type-level subset of the same shape.** Not the full `WhereInput`:
+
+```ts
+type LiveWhere<M> =
+  & { AND?: LiveWhere<M>[]; OR?: LiveWhere<M>[]; NOT?: LiveWhere<M> }
+  & { [F in ViewScalarField<M>]?: FieldType<M, F> | LiveFilter<FieldType<M, F>> }
+
+type LiveFilter<T> = {
+  equals?: T; not?: T; in?: T[]; notIn?: T[]
+  lt?: T; lte?: T; gt?: T; gte?: T
+  contains?: string; startsWith?: string; endsWith?: string
+  mode?: 'insensitive'          // was §4.2's $ilike; carries hazard #2 unchanged
+}
+```
+
+### Why Tier 2 cannot just take `Prisma.ModelWhereInput`
+
+This is the most tempting shortcut available and it is the one the Mongo predecessor makes look
+free. `nestjs-realtime-mongo` put `FilterQuery<T>` straight on the wire and it worked **because in
+Mongo the query language *is* the matcher language** — mingo evaluates `FilterQuery` in memory.
+There is no mingo for `Prisma.JobWhereInput`. Three consequences:
+
+1. **No code is saved on the hard half.** You write the in-memory evaluator either way.
+2. **The evaluator would owe the whole surface** — `some`/`every`/`none`, nested relation
+   traversal, JSON path filters — none of which are evaluable against a single-table WAL row. The
+   subset ends up defined by *exclusion*, which is far worse to security-review than inclusion.
+3. **The AST is a security boundary and must be CLOSED.** `WhereInput` is a surface Prisma can
+   extend in a minor version. A new operator the evaluator doesn't know is either a crash or —
+   worse — a filter that means one thing in SQL and another in memory. §4.1's invariant becomes
+   un-holdable against a moving target, and the differential suite loses its enumerable domain.
+
+There is also a DX/leak argument: `WhereInput` is generated over *all* model fields, so the types
+would autocomplete `passwordHash` while the runtime rejected it. `ViewScalarField<M>` is derived
+from the transform (§2's sentinel probe), so the filter-oracle is closed *in the type system*
+rather than by a runtime denial.
+
+## 14.10 Native Postgres RLS — rejected for v1, with a roadmap backstop
+
+**One fact decides it: logical decoding bypasses RLS entirely.** Policies are a SELECT-time
+construct; the WAL has no notion of them. So on Tier 2 — live subscriptions, the entire point of
+this package — native RLS contributes nothing, and the in-memory predicate is still required.
+
+This is not a theoretical objection. It is *the* reason Supabase Realtime doesn't scale. Unable to
+evaluate a policy against a WAL tuple, `realtime.apply_rls` re-`SELECT`s each row per subscriber
+under role impersonation — which §7.1 traces directly to their ~3,000-subscriber cliff, their
+single-threaded ordering, and their unfilterable DELETEs. Native RLS *causes* that architecture.
+
+Three secondary costs:
+
+- **§6 routing dies.** Routing keys are extracted from the compiled predicate. A native policy is
+  an opaque `pg_policy.polqual` node tree; recovering equalities means parsing it.
+- **Claims are arrays.** `visibleDoctorIds` through `current_setting` means serializing arrays into
+  a GUC string and re-parsing them inside every policy, on every query.
+- **`SET LOCAL` requires transaction-scoped connections**, constraining pooling.
+
+**Roadmap item, not v1.** Policies are already data in the registry (§14.3), so a *third* emitter —
+`compilePolicyToSql()` → `CREATE POLICY` statements in a generated migration — would give
+database-enforced defense-in-depth on the SQL path from the same single source of truth, with no
+drift. That directly serves §1's fail-closed requirement. Deferred because §4.1's two-interpreter
+invariant is already the hardest correctness problem here and a third interpreter triples that
+surface. Revisit once the differential suite is green.
+
+**Under no circumstances a replacement for the in-memory matcher** — see the first paragraph.
+
+## 14.11 Transport — why not `@supabase/realtime-js`
+
+Evaluated and rejected. Its `package.json` keywords are `phoenix`, `elixir`: it is the client half
+of Supabase's **Elixir** server, speaking the Phoenix Channels wire protocol. Adopting it means
+implementing Phoenix Channels *in NestJS* — join/leave/push/reply, refs, join_refs, heartbeats,
+topic naming — to replace a socket.io mux + superjson parser that already works
+(`pg-realtime/src/socketio/`). That is more code, not less.
+
+It also drags in the format the design exists to beat: `postgres_changes` carries the flat
+`(column, op, value)` composite array that §4.2 identifies as the root cause of every Supabase
+refusal — no OR, no cross-column, no casts, no joins. Adopting their transport means adopting the
+constraint that motivates this package.
+
+Their genuinely good ideas are already stolen in §11. Take those; not the transport.
+
+## 14.12 Amends §13 — build order, in reviewable phases
 
 Each phase is a reviewable unit that leaves the tree green. Phases 1–5 involve no WAL and no
 sockets.
