@@ -26,7 +26,6 @@ import {
   type Resolved,
 } from './tokens.js';
 import type { PgbaseModuleAsyncOptions, PgbaseModuleOptions, PgbasePrismaClient } from './types.js';
-
 export { PgbaseContextMiddleware } from './context-middleware.js';
 export { PgbaseExceptionFilter } from './exception-filter.js';
 export { PgbaseLiveGateway } from './live-gateway.js';
@@ -35,6 +34,13 @@ export type { LiveWalOptions, PgbaseLiveRuntimeOptions } from './live-runtime.js
 export { PgbaseReadService } from './read-service.js';
 export { ScopedPrismaToken } from './scoped-prisma.js';
 export type { ScopedPrisma, ScopedPrismaService, ScopedPrismaTokenClass } from './scoped-prisma.js';
+export {
+  PGBASE_CLAIMS_CACHE,
+  PGBASE_CONTEXT_STORE,
+  PGBASE_OPTIONS,
+  PGBASE_RESOLVED,
+  PGBASE_WIRE_CODEC,
+} from './tokens.js';
 export type {
   PgbaseLiveOptions,
   PgbaseModuleAsyncOptions,
@@ -119,9 +125,12 @@ export class PgbaseModule implements NestModule {
         ...scoped,
         { provide: APP_FILTER, useClass: PgbaseExceptionFilter },
       ],
-      exports: options.scopedPrisma
-        ? [PgbaseReadService, options.scopedPrisma]
-        : [PgbaseReadService],
+      exports: [
+        PgbaseReadService,
+        PGBASE_CONTEXT_STORE,
+        PGBASE_CLAIMS_CACHE,
+        ...(options.scopedPrisma ? [options.scopedPrisma] : []),
+      ],
     };
   }
 

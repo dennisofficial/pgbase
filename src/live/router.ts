@@ -49,11 +49,13 @@ export class DefaultChangeRouter implements ChangeRouter {
     undecidable: string[],
   ): void {
     if (change.kind === 'delete') {
-      deltas.push({
-        kind: 'remove',
-        subscriptionId: sub.id,
-        key: sub.identify(change.oldRow ?? {}),
-      });
+      if (this.heldBefore(sub, change)) {
+        deltas.push({
+          kind: 'remove',
+          subscriptionId: sub.id,
+          key: sub.identify(change.oldRow ?? {}),
+        });
+      }
       return;
     }
 
@@ -69,13 +71,23 @@ export class DefaultChangeRouter implements ChangeRouter {
     }
 
     const row = change.newRow!;
-    const matches = evaluate(sub.predicate, row);
-    if (matches) {
+    if (evaluate(sub.predicate, row)) {
       deltas.push({ kind: 'upsert', subscriptionId: sub.id, row: sub.project(row) });
-    } else if (change.kind === 'update') {
+      return;
+    }
+    if (change.kind !== 'update') return;
+    if (this.heldBefore(sub, change)) {
       deltas.push({ kind: 'remove', subscriptionId: sub.id, key: sub.identify(row) });
     }
-    // insert + no match: nothing to deliver.
+  }
+
+  private heldBefore(sub: Subscription, change: ChangeEvent): boolean {
+    const oldRow = change.oldRow;
+    if (oldRow !== null && [...sub.predicateColumns].every((c) => c in oldRow)) {
+      return evaluate(sub.predicate, oldRow);
+    }
+    if (change.newRow === null) return true;
+    return evaluate(sub.rlsPredicate, change.newRow);
   }
 
   routeResync(resync: ResyncEvent): RouteResult {

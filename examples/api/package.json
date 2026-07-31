@@ -9,7 +9,8 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:reset": "prisma migrate reset",
-    "db:seed": "nest build && node dist/prisma/seed.js"
+    "db:seed": "nest build && node dist/prisma/seed.js",
+    "smoke": "nest build && node dist/src/live-smoke.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",
@@ -28,6 +29,7 @@
     "@types/node": "^25.6.0",
     "@types/pg": "^8.11.10",
     "prisma": "7.9.1",
+    "socket.io-client": "^4.8.1",
     "typescript": "6.0.3"
   }
 }

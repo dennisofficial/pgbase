@@ -233,6 +233,10 @@ beforeAll(async () => {
       secret text NOT NULL
     )
   `);
+  // FULL, as the example app and the docs recommend: evicting a row re-parented across tenants
+  // needs the pre-image to prove the subscriber held it. Without one the router must stay silent
+  // rather than name another tenant's primary key.
+  await pool.query(`ALTER TABLE "${TABLE}" REPLICA IDENTITY FULL`);
   model = await resolveSimpleModel(pool, 'LiveGatewayWidget', TABLE, [
     { name: 'id', required: true },
     { name: 'tenant', required: true },
@@ -463,6 +467,52 @@ describe('PgbaseLiveRuntime', () => {
       await runtime.stop();
     }
   }, 30_000);
+
+  it('refuses a subscription when this instance is not the one streaming', async () => {
+    // Two instances, one slot — real leader election, the shape of any rolling deploy. The standby
+    // can still run the snapshot query and return a correct-looking initial result, then never
+    // deliver a delta, because WAL only reaches the slot holder. Every instance passes through
+    // this state on startup while the previous holder's replication connection expires, and a
+    // subscription accepted there is silently dead.
+    const a = await startHttpServer();
+    const b = await startHttpServer();
+    const storeA = new AsyncLocalStorageContextStore();
+    const storeB = new AsyncLocalStorageContextStore();
+    const leader = buildRuntime(
+      a.httpServer,
+      new PgbaseReadService(moduleOptions, resolved, storeA),
+      storeA,
+    );
+    const standby = buildRuntime(
+      b.httpServer,
+      new PgbaseReadService(moduleOptions, resolved, storeB),
+      storeB,
+    );
+
+    await leader.start();
+    await waitFor(() => leader.stats.state === 'streaming', 15_000);
+    await standby.start();
+
+    const socket = newClient(b.baseUrl, 'standby-tenant');
+    await waitConnected(socket);
+    try {
+      expect(standby.stats.state).not.toBe('streaming');
+      const ack = await emitAck<any>(socket, PGBASE_SUBSCRIBE, {
+        model: 'LiveGatewayWidget',
+        where: {},
+      });
+      expect(ack.ok).toBe(false);
+      expect(ack.error.message).toMatch(/not streaming|slot/i);
+      // A refused subscription must leave nothing behind to route to.
+      expect(standby.subscriptionCount).toBe(0);
+    } finally {
+      socket.close();
+      await standby.stop();
+      await leader.stop();
+      await new Promise<void>((resolve) => b.httpServer.close(() => resolve()));
+      await new Promise<void>((resolve) => a.httpServer.close(() => resolve()));
+    }
+  }, 60_000);
 
   it('refuses a subscription whose result set exceeds the snapshot cap', async () => {
     // Beyond the cap the snapshot holds the first `maxRows` rows while the live predicate keeps

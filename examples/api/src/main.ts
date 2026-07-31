@@ -8,6 +8,10 @@ try {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.enableCors({
+    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
+    allowedHeaders: ['content-type', 'x-pgbase-dev-user'],
+  });
   app.enableShutdownHooks();
   await app.listen(process.env.PORT ?? 3001);
 }

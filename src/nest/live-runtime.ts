@@ -58,6 +58,9 @@ export interface PgbaseLiveRuntimeOptions {
   readonly socketIoOptions?: Partial<ServerOptions>;
 }
 
+/** How long a subscribe waits for the leader to start streaming before giving up on this instance. */
+const STREAMING_GRACE_MS = 5_000;
+
 interface SocketState {
   readonly principal: unknown;
   readonly claims: unknown;
@@ -191,6 +194,20 @@ export class PgbaseLiveRuntime {
         model,
       );
 
+      // Only the instance holding the replication slot receives WAL. Any other one can still run
+      // the snapshot query and hand back a perfectly good initial result, then never send a single
+      // delta — a subscription that looks healthy and is silently dead. Right after a restart this
+      // is the normal state for as long as the previous holder's connection takes to expire
+      // (`wal_sender_timeout`), so wait briefly, then refuse rather than ack a lie.
+      await this.awaitStreaming();
+      if (this.leader.stats.state !== 'streaming') {
+        throw new Error(
+          `This instance is not streaming replication (leader state: ${this.leader.stats.state}), ` +
+            `so it cannot deliver live changes. Another instance holds the replication slot, or ` +
+            `this one is still acquiring it. Reconnect to retry.`,
+        );
+      }
+
       id = randomUUID();
       const buffer: Delta[] = [];
       let live = false;
@@ -264,6 +281,16 @@ export class PgbaseLiveRuntime {
         this.teardown(id);
       }
       return { ok: false, error: toWireError(err) };
+    }
+  }
+
+  /** Resolves as soon as the leader is streaming, or after the grace period, whichever is first. */
+  private async awaitStreaming(): Promise<void> {
+    const deadline = STREAMING_GRACE_MS;
+    const step = 100;
+    for (let waited = 0; waited < deadline; waited += step) {
+      if (this.leader.stats.state === 'streaming') return;
+      await new Promise((resolve) => setTimeout(resolve, step));
     }
   }
 

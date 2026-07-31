@@ -391,7 +391,21 @@ ALTER TABLE "jobs" REPLICA IDENTITY FULL;
 ```
 
 Leaving it at the default is a supported fallback, not a misconfiguration: those tables degrade to
-full-row updates and unfilterable deletes. Never combine `FULL` with a column-list publication —
+full-row updates and unfilterable deletes.
+
+**One case where the default changes behaviour, not just cost.** A `remove` names a row's primary
+key, so sending one to a subscriber who may not read that row would disclose its existence and the
+timing of writes to it. Deciding whether a `remove` is a legitimate eviction or a disclosure means
+knowing whether that subscriber held the row _before_ the change — and only a pre-image can say.
+
+So with `FULL`, a row moved out of a subscriber's RLS scope is evicted exactly. Without it, the
+router stays silent: the subscriber keeps a stale copy of a row it legitimately received earlier
+until its next reconnect, and no key belonging to another tenant is ever named. Deletes are the
+exception — with no post-image to judge by either, the `remove` is sent, because rows that stay on
+screen after being deleted is the worse failure. `FULL` removes that case too.
+
+If a table's RLS columns are mutable — anything that can be re-parented across tenants — set
+`FULL` on it. Never combine `FULL` with a column-list publication —
 Postgres accepts the DDL and then blocks every `UPDATE` and `DELETE` on the table, which is why
 boot rejects the combination up front.
 

@@ -73,6 +73,8 @@ export function widgetSubscription(
     model: 'Widget',
     predicate,
     predicateColumns: referencedColumns(predicate),
+    rlsPredicate: widgetPredicate({}),
+    rlsColumns: new Set<string>(),
     project,
     identify: identifyWidget,
   };

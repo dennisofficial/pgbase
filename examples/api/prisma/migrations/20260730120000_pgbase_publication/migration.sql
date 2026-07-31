@@ -1,0 +1,11 @@
+-- The publication the WAL leader streams from. Its name must match both the `publication` passed
+-- to the schema resolver and `live.publication` in PgbaseModule — boot validation compares what
+-- this publication actually covers against what the policies expose.
+--
+-- FOR ALL TABLES rather than a table list: a new model added later is then live automatically,
+-- and there is no second place to remember to update. It requires superuser at CREATE time.
+--
+-- Note the deliberate absence of a column list. A publication with one is rejected at boot when
+-- the table is REPLICA IDENTITY FULL — Postgres refuses that combination at DML time, which would
+-- turn every UPDATE into a runtime error rather than a startup one.
+CREATE PUBLICATION pgbase FOR ALL TABLES;

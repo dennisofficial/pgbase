@@ -17,6 +17,8 @@ export interface Subscription {
   readonly model: string;
   readonly predicate: PredicateNode;
   readonly predicateColumns: ReadonlySet<string>;
+  readonly rlsPredicate: PredicateNode;
+  readonly rlsColumns: ReadonlySet<string>;
   readonly project: (row: ColumnRow) => unknown;
   readonly identify: (row: ColumnRow) => Record<string, unknown>;
 }

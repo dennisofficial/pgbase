@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { AppController } from './app.controller';
 import pgbaseSchema from './generated/pgbase/index';
 import { ClaimsModule, OrgMembershipClaimsBuilder, type Principal } from './pgbase/claims';
+import { JobCommandService } from './pgbase/job-command.service';
 import { JobSummaryService } from './pgbase/job-summary.service';
 import { pgbasePolicies } from './pgbase/policies';
 import { SCHEMA_POOL, SchemaPoolModule } from './pgbase/schema-pool.provider';
@@ -20,15 +21,27 @@ import { PrismaService } from './prisma/prisma.service';
 const DEV_USER_HEADER = 'x-pgbase-dev-user';
 
 interface RequestLike {
-  readonly headers: Record<string, string | string[] | undefined>;
+  readonly headers?: Record<string, string | string[] | undefined>;
+  /** socket.io's handshake carries this; an HTTP request does not. */
+  readonly auth?: Record<string, unknown>;
 }
 
+/**
+ * Reads the caller from a header OR socket.io's handshake `auth` payload, because a browser cannot
+ * send custom headers on a WebSocket handshake — the WebSocket API has no way to set them, so
+ * `extraHeaders` is silently dropped there. Anything that must work from a browser socket has to
+ * travel in `auth`. Real token auth will hit exactly the same constraint.
+ */
 function getPrincipal(req: unknown): Principal {
-  const header = (req as RequestLike).headers[DEV_USER_HEADER];
-  const userId = Array.isArray(header) ? header[0] : header;
+  const like = req as RequestLike;
+  const header = like.headers?.[DEV_USER_HEADER];
+  const fromHeader = Array.isArray(header) ? header[0] : header;
+  const fromAuth = like.auth?.[DEV_USER_HEADER];
+  const userId = fromHeader ?? (typeof fromAuth === 'string' ? fromAuth : undefined);
   if (!userId) {
     throw new UnauthorizedException(
-      `Missing "${DEV_USER_HEADER}" header (dev-only stand-in for auth) — set it to a seeded user id.`,
+      `Missing "${DEV_USER_HEADER}" (dev-only stand-in for auth). Send it as a header over HTTP, ` +
+        `or in socket.io's "auth" payload over a socket — a browser WebSocket cannot send headers.`,
     );
   }
   return userId;
@@ -54,11 +67,17 @@ function getPrincipal(req: unknown): Principal {
         policies: pgbasePolicies,
         claimsBuilder,
         getPrincipal,
+        live: {
+          replicationConfig: { connectionString: process.env.DATABASE_URL },
+          slotName: process.env.PGBASE_SLOT ?? 'pgbase_example',
+          publication: 'pgbase',
+          socketIoOptions: { cors: { origin: 'http://localhost:3000' } },
+        },
       }),
       scopedPrisma: ScopedDb,
     }),
   ],
   controllers: [AppController],
-  providers: [JobSummaryService],
+  providers: [JobSummaryService, JobCommandService],
 })
 export class AppModule {}

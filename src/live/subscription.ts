@@ -50,12 +50,15 @@ export function createSubscription(input: SubscriptionInput): Subscription {
   const { id, model, policy, claims, where = {} } = input;
   const filterable = computeFilterable(model, policy).filterable;
   const predicate = normalize(scopedWhere(policy, claims, where), model, filterable);
+  const rlsPredicate = normalize(policy.rls(claims), model, filterable);
 
   return {
     id,
     model: model.model,
     predicate,
     predicateColumns: referencedColumns(predicate),
+    rlsPredicate,
+    rlsColumns: referencedColumns(rlsPredicate),
     project: buildLiveProjector(model, policy),
     identify: buildIdentifier(model),
   };
