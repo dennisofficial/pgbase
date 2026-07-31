@@ -1,6 +1,6 @@
 import { Module, UnauthorizedException } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PgbaseModule } from '@workspace/pgbase/nest';
+import { PgbaseModule } from '@dltech/pgbase/nest';
 import type { Pool } from 'pg';
 import { AppController } from './app.controller';
 import pgbaseSchema from './generated/pgbase/index';

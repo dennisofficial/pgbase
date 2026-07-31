@@ -1,4 +1,4 @@
-import { createClient, type LiveSocket } from '@workspace/pgbase/client';
+import { createClient, type LiveSocket } from '@dltech/pgbase/client';
 import { io } from 'socket.io-client';
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';

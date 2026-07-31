@@ -1,7 +1,7 @@
 'use client';
 
-import { useLiveQuery } from '@workspace/pgbase/react';
-import type { ConnectionStatus } from '@workspace/pgbase/client';
+import { useLiveQuery } from '@dltech/pgbase/react';
+import type { ConnectionStatus } from '@dltech/pgbase/client';
 import { useEffect, useRef, useState } from 'react';
 import { EventLog, useEventLog } from '../../../components/event-log';
 import { ScenarioShell, runButtonStyle } from '../../../components/scenario-shell';

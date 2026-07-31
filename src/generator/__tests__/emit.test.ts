@@ -34,10 +34,10 @@ const SCHEMA: StaticSchema = {
 };
 
 describe('emitStaticSchemaModule', () => {
-  const source = emitStaticSchemaModule(SCHEMA, { packageSpecifier: '@workspace/pgbase/schema' });
+  const source = emitStaticSchemaModule(SCHEMA, { packageSpecifier: '@dltech/pgbase/schema' });
 
   it('imports StaticSchema type-only from the given package specifier', () => {
-    expect(source).toContain("import type { StaticSchema } from '@workspace/pgbase/schema';");
+    expect(source).toContain("import type { StaticSchema } from '@dltech/pgbase/schema';");
   });
 
   it('default-exports a value checked against StaticSchema via "satisfies"', () => {
@@ -48,7 +48,7 @@ describe('emitStaticSchemaModule', () => {
     expect(source).not.toMatch(/\binterface\b/);
     expect(source).not.toMatch(/\btype\s+\w+\s*=/);
     expect(source.match(/^import.*$/gm)).toEqual([
-      "import type { StaticSchema } from '@workspace/pgbase/schema';",
+      "import type { StaticSchema } from '@dltech/pgbase/schema';",
     ]);
   });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useLiveQuery } from '@workspace/pgbase/react';
+import { useLiveQuery } from '@dltech/pgbase/react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { API_URL, DEV_USERS, pgbase, setDevUser, type DevUser } from '../pgbase/client';

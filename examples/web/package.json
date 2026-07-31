@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.9.0",
-    "@workspace/pgbase": "workspace:*",
+    "@dltech/pgbase": "workspace:*",
     "next": "^15.5.22",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

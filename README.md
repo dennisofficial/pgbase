@@ -5,7 +5,7 @@ one-shot — through a typed SDK, inside a row-level-security envelope they cann
 
 > **Status: pre-alpha.** The schema registry, policy validation, claims, and **one-shot reads**
 > work — over HTTP and in-process. Live subscriptions, the client SDK, and the React bindings do
-> not exist yet; `@workspace/pgbase/client` and `/react` are empty stubs.
+> not exist yet; `@dltech/pgbase/client` and `/react` are empty stubs.
 
 ## The pattern is CQS
 
@@ -165,7 +165,7 @@ caller's claims. The registry is exhaustive — a model you forget is a `tsc` er
 boot-time surprise — and models with no client access are opted out explicitly:
 
 ```ts
-import { NO_CLIENT_ACCESS, definePolicy, type PolicyRegistry } from '@workspace/pgbase/policy';
+import { NO_CLIENT_ACCESS, definePolicy, type PolicyRegistry } from '@dltech/pgbase/policy';
 
 const jobPolicy = definePolicy<JobModel, Claims>('Job')({
   rls: (claims) => ({ orgId: { in: claims.orgIds } }),
@@ -325,6 +325,29 @@ Step 1 gives you the server settings. This is the rest of the picture: what the 
 versus the live path, what pgbase creates for you versus what it refuses to, and how each knob is
 spelled on the managed providers.
 
+### The one migration you have to write by hand
+
+Prisma has no concept of a publication, so nothing in `prisma migrate` will ever emit this. pgbase
+cannot create it for you either: `CREATE PUBLICATION ... FOR ALL TABLES` requires superuser, which
+most production databases deliberately withhold from the application role. So it goes in a
+migration you write once:
+
+```sql
+-- prisma/migrations/<timestamp>_pgbase_publication/migration.sql
+CREATE PUBLICATION pgbase FOR ALL TABLES;
+```
+
+`FOR ALL TABLES` rather than a table list means a model added later is live automatically, with no
+second place to remember. If you cannot grant superuser even once, list the tables instead —
+`CREATE PUBLICATION pgbase FOR TABLE "jobs", "tasks"` needs only ownership of those tables.
+
+Never give the publication a column list. Postgres accepts the DDL and then blocks every `UPDATE`
+and `DELETE` on any table that is also `REPLICA IDENTITY FULL`, so pgbase rejects the combination at
+boot rather than letting you discover it at write time.
+
+Boot fails with the exact statement to run if the publication is missing, so a forgotten migration
+is a startup error, never a silently dead subscription.
+
 **PostgreSQL 15 or newer.** Boot-time schema resolution reads `pg_publication_rel.prattrs`, and
 that column arrived with publication column lists in PG 15. The dev image is 16.
 
@@ -347,7 +370,7 @@ on any provider.
 
 ### Live subscriptions — what the WAL leader will need
 
-Not wired into `PgbaseModule` yet; `@workspace/pgbase/wal` is the standalone piece. Configure the
+Not wired into `PgbaseModule` yet; `@dltech/pgbase/wal` is the standalone piece. Configure the
 database ahead of it and the switch-on is a no-op. Four things beyond the settings in step 1.
 
 **The role needs the `REPLICATION` attribute** — both to open the replication connection and to
@@ -487,16 +510,18 @@ SELECT relname, relreplident FROM pg_class WHERE relname = 'jobs';  -- 'f' = FUL
 
 | Import                      | Contents                                                            |
 | --------------------------- | ------------------------------------------------------------------- |
-| `@workspace/pgbase/nest`    | `PgbaseModule`, `PgbaseReadService`, `ScopedPrismaToken`            |
-| `@workspace/pgbase/policy`  | `definePolicy`, `NO_CLIENT_ACCESS`, `PolicyRegistry`, validation    |
-| `@workspace/pgbase/context` | `ClaimsBuilder`, the claims cache, scoped-write assertions          |
-| `@workspace/pgbase/query`   | the query AST, `normalize`, `evaluate`, `compileSql`                |
-| `@workspace/pgbase/read`    | read scoping, result plans, the wire codec                          |
-| `@workspace/pgbase/schema`  | `PgCatalogSchemaProvider` and resolved-schema types                 |
-| `@workspace/pgbase/wal`     | `createWalLeader`, the pgoutput decoder, change/resync events       |
-| `@workspace/pgbase/client`  | _not implemented_ — framework-agnostic client                       |
-| `@workspace/pgbase/react`   | _not implemented_ — RTK Query bindings and hooks                    |
-| `@workspace/pgbase`         | _empty_ — the root entry exports nothing yet; import from a subpath |
+| `@dltech/pgbase/nest`    | `PgbaseModule`, `PgbaseReadService`, `ScopedPrismaToken`            |
+| `@dltech/pgbase/policy`  | `definePolicy`, `NO_CLIENT_ACCESS`, `PolicyRegistry`, validation    |
+| `@dltech/pgbase/context` | `ClaimsBuilder`, the claims cache, scoped-write assertions          |
+| `@dltech/pgbase/query`   | the query AST, `normalize`, `evaluate`, `compileSql`                |
+| `@dltech/pgbase/read`    | read scoping, result plans, the wire codec                          |
+| `@dltech/pgbase/schema`  | `PgCatalogSchemaProvider` and resolved-schema types                 |
+| `@dltech/pgbase/wal`     | `createWalLeader`, the pgoutput decoder, change/resync events       |
+| `@dltech/pgbase/live`    | the live subscription protocol shared by gateway and client        |
+| `@dltech/pgbase/transport` | the change transport (Postgres/Redis fan-out) and its codec      |
+| `@dltech/pgbase/client`  | _not implemented_ — framework-agnostic client                       |
+| `@dltech/pgbase/react`   | _not implemented_ — RTK Query bindings and hooks                    |
+| `@dltech/pgbase`         | _empty_ — the root entry exports nothing yet; import from a subpath |
 
 `query` is dependency-light on purpose: the same `evaluate` is meant to run on the server (against
 WAL tuples) and in the browser (to fan one socket-level subscription out to many component
@@ -504,10 +529,12 @@ queries). Only the server half exists today.
 
 ## Scripts
 
-- `pnpm build` — dual CJS/ESM build via tsup, then asserts decorator metadata survived
+- `pnpm build` — dual CJS/ESM build via tsup, including the `.d.ts` / `.d.mts` declaration trees
 - `pnpm dev` — watch mode
 - `pnpm typecheck` — `tsc --noEmit`
 - `pnpm test` — vitest (needs the test database: `pnpm example:up`)
+- `pnpm changeset` — record a pending release note and its semver bump
+- `pnpm release` — apply pending changesets: bump the version, rewrite `CHANGELOG.md`
 - `pnpm example:up` / `example:down` — docker compose; brings up both the example database
   (`:55432`) and the test database (`:55433`)
 - `pnpm example:api` — run the example NestJS API
@@ -515,6 +542,54 @@ queries). Only the server half exists today.
 The build depends on `@swc/core`: tsup only emits `design:paramtypes` when it can resolve it, and
 degrades to a warning otherwise, so `postbuild` fails the build rather than shipping a package
 whose providers can't be resolved by Nest.
+
+## Releasing
+
+Development happens directly on `main`. Pushing to `main` never publishes on its own — `main` is
+kept continuously releasable, and a **version-bump commit** is what triggers a release.
+
+```bash
+pnpm changeset                                  # describe the change, choose patch/minor/major
+pnpm release                                    # apply pending changesets -> version + CHANGELOG
+git commit -am "chore(release): v1.1.0"
+git push                                        # this is the release
+```
+
+On push, `.github/workflows/publish.yml` compares `package.json`'s version against the git tags.
+If the version is already tagged it exits; otherwise it typechecks, runs the suite, packs a real
+tarball and validates it, publishes to npm with provenance, tags `v<version>`, and opens a GitHub
+release. `.github/workflows/ci.yml` runs typecheck and tests on every push to `main` independently.
+
+The tarball is validated with [`publint`](https://publint.dev) and
+[`arethetypeswrong`](https://arethetypeswrong.github.io) before publishing, because the failures
+that matter most here are invisible to the test suite: a malformed `exports` map, a subpath whose
+types resolve locally but not from an installed package, or declaration files missing from the
+artifact entirely.
+
+### Prereleases
+
+npm packages have no staging environment; the equivalent is a dist-tag. To soak a change inside a
+real consuming project before it becomes the default install:
+
+```bash
+pnpm changeset pre enter next   # subsequent releases publish as 1.1.0-next.N under the `next` tag
+pnpm changeset pre exit         # back to normal releases on `latest`
+```
+
+Consumers opt in with `pnpm add @dltech/pgbase@next`. Nobody running a plain
+`pnpm add @dltech/pgbase` is affected until the version is promoted to `latest`.
+
+### Publishing credentials
+
+The workflow authenticates with the `NPM_TOKEN` repository secret — a granular npm token with
+**read and write** on the `@dltech` scope and **no** organization access. Scope-level (rather than
+per-package) selection is what lets it publish packages under `@dltech` that do not exist yet.
+
+Once the package exists on npm, the token can be retired in favour of
+[trusted publishing](https://docs.npmjs.com/trusted-publishers): configure this repo and workflow
+as a trusted publisher in the package's npm settings, and delete the secret. The workflow already
+requests `id-token: write`, and pnpm exchanges that OIDC token for short-lived credentials — no
+long-lived secret to rotate or leak.
 
 ## License
 

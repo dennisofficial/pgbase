@@ -1,0 +1,50 @@
+name: CI
+
+# Work happens directly on main, so this is the safety net that runs after the fact.
+# The pull_request trigger stays for the occasional branch worth vetting before it lands.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # `prepare` runs tsup, so dist/ and the .d.ts/.d.mts trees are built here.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # The suites need logical decoding (wal_level=logical) plus dedicated replication
+      # slots, so they run against the real compose services rather than a plain
+      # postgres service container.
+      - name: Start Postgres
+        run: docker compose up -d --wait
+
+      - name: Test
+        run: pnpm test
+
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Stop Postgres
+        if: always()
+        run: docker compose down -v

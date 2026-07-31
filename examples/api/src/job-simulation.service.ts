@@ -1,4 +1,4 @@
-import { ScopedRowNotFoundError } from '@workspace/pgbase/nest';
+import { ScopedRowNotFoundError } from '@dltech/pgbase/nest';
 import type { JobStatus } from './generated/prisma/enums.js';
 import type { ScopedDb } from './pgbase/scoped-db.js';
 

@@ -8,7 +8,7 @@ import {
 } from '../live/protocol.js';
 import type { Delta } from '../live/types.js';
 import type { LiveWhere } from '../query/ast.js';
-import { createWireCodec, type WireCodec } from '../read/wire.js';
+import { PgbaseWireCodec, type WireCodec } from '../read/wire.js';
 import { PgbaseHttpError } from './errors.js';
 import { SocketSubscription } from './subscription.js';
 import type {
@@ -46,7 +46,7 @@ export class PgbaseCore {
     this.options = options;
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.prefix = options.prefix ?? 'pgbase';
-    this.wire = options.wire ?? createWireCodec();
+    this.wire = options.wire ?? new PgbaseWireCodec();
     this.getAuth = options.getAuth;
   }
 

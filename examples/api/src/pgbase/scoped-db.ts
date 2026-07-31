@@ -1,4 +1,4 @@
-import { ScopedPrismaToken } from '@workspace/pgbase/nest';
+import { ScopedPrismaToken } from '@dltech/pgbase/nest';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { pgbasePolicies } from './policies.js';
 

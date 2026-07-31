@@ -1,14 +1,15 @@
 packages:
   - '.'
   - examples/*
+
+overrides:
+  supports-color: '8.1.1'
+
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true
   prisma: true
   esbuild: false
   sharp: false
-
-# Atlas consumes this repo as a submodule and globs `submodules/**`, which would otherwise pull
-# examples/* into ITS workspace and impose its overrides (react 19.2.7, typescript 6.0.3,
-# injectWorkspacePackages, nodeLinker: isolated) on them. Atlas excludes them explicitly; this
-# file is what makes the examples resolve when pgbase is cloned standalone.
+  '@swc/core': true
+minimumReleaseAgeStrict: false

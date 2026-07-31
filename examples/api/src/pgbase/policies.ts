@@ -1,4 +1,4 @@
-import { NO_CLIENT_ACCESS, definePolicy, type PolicyRegistry } from '@workspace/pgbase/policy';
+import { NO_CLIENT_ACCESS, definePolicy, type PolicyRegistry } from '@dltech/pgbase/policy';
 import type { Prisma } from '../generated/prisma/client.js';
 import type {
   AuditLogModel,

@@ -19,7 +19,7 @@
     "@nestjs/platform-express": "^11.1.28",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
-    "@workspace/pgbase": "workspace:*",
+    "@dltech/pgbase": "workspace:*",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"

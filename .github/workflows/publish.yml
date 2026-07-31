@@ -1,0 +1,104 @@
+name: Publish
+
+# Runs on every push to main, but only acts when package.json carries a version that
+# has no matching tag yet — which is exactly the commit where a release/* branch was
+# merged back in. Ordinary feature merges leave the version untouched and no-op here.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Tag and publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Required for npm provenance, which signs the package with a verifiable link
+      # back to this workflow run.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Read version
+        id: v
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "v$version is already tagged; nothing to release."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "v$version is new; proceeding to release."
+          fi
+
+      - run: pnpm install --frozen-lockfile
+        if: steps.v.outputs.published == 'false'
+
+      - name: Typecheck
+        if: steps.v.outputs.published == 'false'
+        run: pnpm typecheck
+
+      - name: Start Postgres
+        if: steps.v.outputs.published == 'false'
+        run: docker compose up -d --wait
+
+      - name: Test
+        if: steps.v.outputs.published == 'false'
+        run: pnpm test
+
+      - name: Stop Postgres
+        if: always() && steps.v.outputs.published == 'false'
+        run: docker compose down -v
+
+      # Catches the failure modes a green test suite cannot: a broken exports map,
+      # types that resolve in this repo but not from an installed tarball, or files
+      # missing from the published artifact.
+      - name: Validate publishable artifact
+        if: steps.v.outputs.published == 'false'
+        run: |
+          pnpm pack
+          npx --yes publint@latest "dltech-pgbase-${{ steps.v.outputs.version }}.tgz"
+          npx --yes @arethetypeswrong/cli@latest "dltech-pgbase-${{ steps.v.outputs.version }}.tgz" --ignore-rules no-resolution
+
+      # Authenticated via npm trusted publishing: the `id-token: write` permission above
+      # lets pnpm exchange a GitHub OIDC token for short-lived npm credentials, so there is
+      # no NPM_TOKEN secret to store, rotate, or leak. npm matches the OIDC claim against
+      # the publisher configured on the package — org/repo plus this workflow's filename,
+      # so renaming this file breaks publishing until the npm config is updated to match.
+      - name: Publish
+        if: steps.v.outputs.published == 'false'
+        run: pnpm publish --access public --no-git-checks --provenance
+
+      - name: Tag release
+        if: steps.v.outputs.published == 'false'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.v.outputs.version }}" -m "v${{ steps.v.outputs.version }}"
+          git push origin "v${{ steps.v.outputs.version }}"
+
+      - name: Create GitHub release
+        if: steps.v.outputs.published == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" \
+            --title "v${{ steps.v.outputs.version }}" \
+            --notes "Published \`@dltech/pgbase@${{ steps.v.outputs.version }}\` to npm. See CHANGELOG.md for details." \
+            --verify-tag

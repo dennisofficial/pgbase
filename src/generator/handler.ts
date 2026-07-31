@@ -6,7 +6,7 @@ import { dmmfToStaticSchema, GeneratorValidationError } from './dmmf-to-static.j
 import { emitStaticSchemaModule } from './emit.js';
 
 const DEFAULT_OUTPUT = '../src/generated/pgbase';
-const DEFAULT_PACKAGE_SPECIFIER = '@workspace/pgbase/schema';
+const DEFAULT_PACKAGE_SPECIFIER = '@dltech/pgbase/schema';
 const OUTPUT_FILE_NAME = 'index.ts';
 
 export function runGenerator(): void {

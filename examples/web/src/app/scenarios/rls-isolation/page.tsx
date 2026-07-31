@@ -1,6 +1,6 @@
 'use client';
 
-import { useLiveQuery } from '@workspace/pgbase/react';
+import { useLiveQuery } from '@dltech/pgbase/react';
 import { useEffect, useRef, useState } from 'react';
 import { EventLog, useEventLog } from '../../../components/event-log';
 import { ScenarioShell } from '../../../components/scenario-shell';

@@ -16,7 +16,7 @@ import type { Resolved } from '../../nest/tokens.js';
 import type { PgbaseModuleOptions } from '../../nest/types.js';
 import { definePolicy } from '../../policy/define.js';
 import { validatePolicies } from '../../policy/index.js';
-import { createWireCodec, type WireCodec } from '../../read/index.js';
+import { PgbaseWireCodec, type WireCodec } from '../../read/index.js';
 import { createTestPool } from '../../schema/test-support.js';
 import type { ResolvedModel } from '../../schema/types.js';
 import { SCHEMA_FORMAT_VERSION } from '../../version.js';
@@ -124,7 +124,7 @@ async function startRuntime(): Promise<{ runtime: PgbaseLiveRuntime; baseUrl: st
   const contextStore = new AsyncLocalStorageContextStore();
   const reads = new PgbaseReadService(moduleOptions, resolved, contextStore);
   const claims = new MemoryClaimsCache(new StaticClaimsBuilder());
-  const wire = createWireCodec();
+  const wire = new PgbaseWireCodec();
   attachReadEndpoint(httpServer, reads, contextStore, wire, claims);
 
   const opts: PgbaseLiveRuntimeOptions = {

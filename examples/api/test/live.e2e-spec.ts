@@ -1,6 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { createWireCodec } from '@workspace/pgbase/read';
+import { PgbaseWireCodec } from '@dltech/pgbase/read';
 import 'reflect-metadata';
 import { io, type Socket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import { configureApp } from '../src/configure-app';
 const ALICE = '00000000-0000-4000-8000-0000000000a1';
 const CAROL = '00000000-0000-4000-8000-0000000000b1';
 
-const wire = createWireCodec();
+const wire = new PgbaseWireCodec();
 
 let app: INestApplication;
 let url: string;

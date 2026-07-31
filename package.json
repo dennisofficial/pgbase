@@ -1,130 +1,170 @@
 {
-  "name": "@workspace/pgbase",
-  "version": "1.0.0",
+  "name": "@dltech/pgbase",
+  "version": "0.1.0",
   "description": "Self-hosted Postgres BaaS for NestJS + Prisma: RLS-guarded live queries over a typed client SDK (CQS)",
   "license": "MIT",
   "author": "Dennis Lysenko",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dennisofficial/pgbase.git"
+  },
+  "homepage": "https://github.com/dennisofficial/pgbase#readme",
+  "bugs": {
+    "url": "https://github.com/dennisofficial/pgbase/issues"
+  },
+  "keywords": [
+    "postgres",
+    "postgresql",
+    "nestjs",
+    "prisma",
+    "rls",
+    "row-level-security",
+    "live-query",
+    "realtime",
+    "subscriptions",
+    "baas",
+    "cqs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "commonjs",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": {
-        "types": "./src/index.ts",
+        "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
       },
       "require": {
-        "types": "./src/index.ts",
+        "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       }
     },
     "./nest": {
       "import": {
-        "types": "./src/nest/index.ts",
+        "types": "./dist/nest/index.d.mts",
         "default": "./dist/nest/index.mjs"
       },
       "require": {
-        "types": "./src/nest/index.ts",
+        "types": "./dist/nest/index.d.ts",
         "default": "./dist/nest/index.js"
       }
     },
     "./client": {
       "import": {
-        "types": "./src/client/index.ts",
+        "types": "./dist/client/index.d.mts",
         "default": "./dist/client/index.mjs"
       },
       "require": {
-        "types": "./src/client/index.ts",
+        "types": "./dist/client/index.d.ts",
         "default": "./dist/client/index.js"
       }
     },
     "./react": {
       "import": {
-        "types": "./src/react/index.ts",
+        "types": "./dist/react/index.d.mts",
         "default": "./dist/react/index.mjs"
       },
       "require": {
-        "types": "./src/react/index.ts",
+        "types": "./dist/react/index.d.ts",
         "default": "./dist/react/index.js"
       }
     },
     "./query": {
       "import": {
-        "types": "./src/query/index.ts",
+        "types": "./dist/query/index.d.mts",
         "default": "./dist/query/index.mjs"
       },
       "require": {
-        "types": "./src/query/index.ts",
+        "types": "./dist/query/index.d.ts",
         "default": "./dist/query/index.js"
       }
     },
     "./schema": {
       "import": {
-        "types": "./src/schema/index.ts",
+        "types": "./dist/schema/index.d.mts",
         "default": "./dist/schema/index.mjs"
       },
       "require": {
-        "types": "./src/schema/index.ts",
+        "types": "./dist/schema/index.d.ts",
         "default": "./dist/schema/index.js"
       }
     },
     "./policy": {
       "import": {
-        "types": "./src/policy/index.ts",
+        "types": "./dist/policy/index.d.mts",
         "default": "./dist/policy/index.mjs"
       },
       "require": {
-        "types": "./src/policy/index.ts",
+        "types": "./dist/policy/index.d.ts",
         "default": "./dist/policy/index.js"
       }
     },
     "./context": {
       "import": {
-        "types": "./src/context/index.ts",
+        "types": "./dist/context/index.d.mts",
         "default": "./dist/context/index.mjs"
       },
       "require": {
-        "types": "./src/context/index.ts",
+        "types": "./dist/context/index.d.ts",
         "default": "./dist/context/index.js"
       }
     },
     "./read": {
       "import": {
-        "types": "./src/read/index.ts",
+        "types": "./dist/read/index.d.mts",
         "default": "./dist/read/index.mjs"
       },
       "require": {
-        "types": "./src/read/index.ts",
+        "types": "./dist/read/index.d.ts",
         "default": "./dist/read/index.js"
       }
     },
     "./wal": {
       "import": {
-        "types": "./src/wal/index.ts",
+        "types": "./dist/wal/index.d.mts",
         "default": "./dist/wal/index.mjs"
       },
       "require": {
-        "types": "./src/wal/index.ts",
+        "types": "./dist/wal/index.d.ts",
         "default": "./dist/wal/index.js"
       }
     },
     "./live": {
       "import": {
-        "types": "./src/live/index.ts",
+        "types": "./dist/live/index.d.mts",
         "default": "./dist/live/index.mjs"
       },
       "require": {
-        "types": "./src/live/index.ts",
+        "types": "./dist/live/index.d.ts",
         "default": "./dist/live/index.js"
       }
-    }
+    },
+    "./transport": {
+      "import": {
+        "types": "./dist/transport/index.d.mts",
+        "default": "./dist/transport/index.mjs"
+      },
+      "require": {
+        "types": "./dist/transport/index.d.ts",
+        "default": "./dist/transport/index.js"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
-    "dist",
-    "src"
+    "dist"
   ],
   "scripts": {
     "build": "tsup",
+    "changeset": "changeset",
+    "release": "changeset version",
     "dev": "nodemon",
     "prepare": "pnpm build",
     "typecheck": "tsc --noEmit",
@@ -175,6 +215,7 @@
     }
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.1",
     "@swc/core": "^1.15.47",
     "@types/node": "^25.6.0",
     "@types/pg": "^8.11.10",
@@ -191,5 +232,6 @@
     "tsup": "^8.5.1",
     "typescript": "6.0.3",
     "vitest": "^3.2.4"
-  }
+  },
+  "packageManager": "pnpm@11.18.0+sha512.33d83c77da82f49fba836925c6f1b841181ec3132b670639bd012f7075f5c7cf634c5f870147c19aae7478fac01df09d8892e880454896edd23ee9b33757563c"
 }

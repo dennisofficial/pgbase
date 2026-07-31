@@ -16,5 +16,5 @@ export type {
   Subscription,
 } from './types.js';
 
-export { createWireCodec } from '../read/wire.js';
-export type { WireCodec, WireCustomType } from '../read/wire.js';
+export { PgbaseWireCodec } from '../read/wire.js';
+export type { WireCodec, WireCodecOptions, WireCustomType } from '../read/wire.js';

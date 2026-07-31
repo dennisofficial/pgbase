@@ -6,7 +6,7 @@ import type {
   LiveScalarFilter,
   LiveStringFilter,
   LiveWhere,
-} from '@workspace/pgbase/query';
+} from '@dltech/pgbase/query';
 import type { Prisma } from './generated/prisma/client.js';
 import { JobStatus } from './generated/prisma/enums.js';
 
