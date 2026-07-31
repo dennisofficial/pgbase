@@ -9,6 +9,12 @@ import {
 } from './pgoutput-messages.js';
 import { WalDecodeError, type ColumnRow } from './types.js';
 
+function floorToMillis(micros: bigint): bigint {
+  const remainder = micros % 1000n;
+  if (remainder === 0n) return micros;
+  return micros - (remainder < 0n ? remainder + 1000n : remainder);
+}
+
 export function parsePgArrayLiteral(text: string, relation: string | null): (string | null)[] {
   if (text.length < 2 || text[0] !== '{' || text[text.length - 1] !== '}') {
     throw new WalDecodeError(
@@ -81,9 +87,9 @@ function decodeScalar(typeOid: number, raw: string, relation: string | null): un
     case OID.UUID:
       return raw.toLowerCase();
     case OID.TIMESTAMPTZ:
-      return parseTimestampMicros(raw, true);
+      return floorToMillis(parseTimestampMicros(raw, true));
     case OID.TIMESTAMP:
-      return parseTimestampMicros(raw, false);
+      return floorToMillis(parseTimestampMicros(raw, false));
     case OID.JSON:
     case OID.JSONB: {
       const parsed: unknown = JSON.parse(raw);

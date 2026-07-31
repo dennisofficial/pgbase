@@ -26,9 +26,6 @@ import {
 const PUBLICATION = 'pgbase_wal_agreement_pub';
 const SLOT = 'pgbase_wal_agreement_slot';
 
-// Timestamp columns carry the leader's one *known, deliberate* divergence from a plain SQL/Prisma
-// read (see the assertions below) — excluded from the blanket equality loop and checked on their
-// own terms instead.
 const TIMESTAMP_COLUMNS = new Set(['c_ts', 'c_ts_n', 'c_tstz', 'c_tstz_n']);
 
 let pool: Pool;
@@ -36,20 +33,6 @@ let model: ResolvedModel;
 let leader: WalLeader;
 const changesByRowId = new Map<number, ChangeEvent>();
 
-/** The "snapshot" path: an ordinary `pool.query` (node-postgres's default `pg-types@2.x` parsing
- * — the version `pg` bundles for its own out-of-the-box decoding, independent of whatever
- * `pg-types` version this package depends on) normalized into `compare.ts`'s canonical
- * representation via `coerceValue`. A genuinely independent decode from the WAL path in
- * `decode.ts`: different code, different wire representation, same target representation.
- *
- * FINDING: node-postgres's bundled parser registers `date` and `timestamp` (no time zone) to the
- * *raw* `postgres-date` parser with no 'Z' appended — unlike `timestamptz`, whose wire text always
- * carries an explicit offset. With no offset in the text at all, `postgres-date` falls back to
- * the **local-timezone** `Date(y, m, d, h, mi, s, ms)` constructor, so `date.getTime()` is
- * silently host-timezone-dependent for these two types. `compare.ts`'s `coerceTimestamp` (and by
- * extension `coerceValue`) trusts `getTime()`, which is only safe for tz-aware wire text. This
- * reconstructs the intended wall-clock value from `Date`'s *local* getters instead — the portable
- * fix — precisely to keep this test deterministic on a non-UTC host (this one runs America/New_York). */
 function snapshotDecode(field: ResolvedField, raw: unknown): unknown {
   if (raw === null) return null;
   if (field.elementTypeOid !== null) {
@@ -161,11 +144,8 @@ describe('WAL decode vs snapshot decode: agreement on every fixture row', () => 
     expect(compared).toBeGreaterThan(0);
   });
 
-  it('FINDING: timestamptz — WAL text carries full microseconds, a plain SQL read does not', async () => {
-    // Every fixture timestamp has a non-millisecond-aligned microsecond remainder (see
-    // differential-fixture.ts's TS_BASE etc: ".123456"), so this isn't a corner case — it is the
-    // typical case for any timestamp not authored at exact millisecond precision.
-    let sawSubMillisecondDivergence = false;
+  it('timestamptz — the WAL path and a plain SQL read agree exactly, to the microsecond', async () => {
+    let compared = 0;
     for (const r of ROWS) {
       const change = changesByRowId.get(r.id as number)!;
       for (const column of ['c_tstz', 'c_tstz_n'] as const) {
@@ -178,31 +158,17 @@ describe('WAL decode vs snapshot decode: agreement on every fixture row', () => 
         ]);
         const snapshotMicros = snapshotDecode(field, rows[0][column]) as bigint;
 
-        const remainder = ((walMicros % 1000n) + 1000n) % 1000n;
-        // The snapshot path is `Date`-based (millisecond resolution): it always lands on a
-        // millisecond boundary.
-        expect(snapshotMicros % 1000n, `row id=${r.id}, column "${column}"`).toBe(0n);
-        if (remainder !== 0n) {
-          sawSubMillisecondDivergence = true;
-          expect(
-            walMicros,
-            `row id=${r.id}, column "${column}" should retain sub-ms precision`,
-          ).not.toBe(snapshotMicros);
-        }
-        // They still agree down to the millisecond — the snapshot path is a truncation of the
-        // WAL path, not a different value.
-        expect(walMicros - remainder, `row id=${r.id}, column "${column}" ms component`).toBe(
-          snapshotMicros,
-        );
+        expect(walMicros % 1000n, `row id=${r.id}, "${column}" must be ms-aligned`).toBe(0n);
+        expect(walMicros, `row id=${r.id}, "${column}" WAL vs snapshot`).toBe(snapshotMicros);
+        compared++;
       }
     }
-    expect(sawSubMillisecondDivergence).toBe(true);
+    expect(compared).toBeGreaterThan(0);
   });
 
   it('FINDING: timestamp (no tz) — a plain SQL read is silently HOST-TIMEZONE-DEPENDENT, not just ms-truncated', async () => {
     // node-postgres's bundled parser has no offset to work with for this type (unlike
     // timestamptz) and falls back to a local-timezone `Date` — see `snapshotDecode`'s doc comment.
-    let sawSubMillisecondDivergence = false;
     let sawHostTimezoneDivergence = false;
     let anyHostOffsetIsNonZero = false;
     for (const r of ROWS) {
@@ -219,11 +185,10 @@ describe('WAL decode vs snapshot decode: agreement on every fixture row', () => 
         const naive = naiveDateMicros(raw);
         // The wall-clock value, recovered portably regardless of host timezone.
         const corrected = correctedLocalDateMicros(raw);
-        const remainder = ((walMicros % 1000n) + 1000n) % 1000n;
 
-        // The portable reconstruction always agrees with the WAL value down to the millisecond.
-        expect(corrected, `row id=${r.id}, column "${column}"`).toBe(walMicros - remainder);
-        if (remainder !== 0n) sawSubMillisecondDivergence = true;
+        // decode.ts floors the WAL value to milliseconds, so the portable reconstruction now
+        // matches it exactly rather than only down to the millisecond.
+        expect(corrected, `row id=${r.id}, column "${column}"`).toBe(walMicros);
 
         // The offset in effect AT THIS INSTANT specifically — not a single fixed reference date.
         // Row 59/60 are pre-epoch (1954), where the historical zone rules for this host's
@@ -241,7 +206,6 @@ describe('WAL decode vs snapshot decode: agreement on every fixture row', () => 
         }
       }
     }
-    expect(sawSubMillisecondDivergence).toBe(true);
     if (anyHostOffsetIsNonZero) expect(sawHostTimezoneDivergence).toBe(true);
   });
 
