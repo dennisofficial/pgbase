@@ -3,9 +3,6 @@ import type { ResolvedSchema } from '../schema/index.js';
 
 export const PGBASE_OPTIONS = Symbol('PGBASE_OPTIONS');
 export const PGBASE_RESOLVED = Symbol('PGBASE_RESOLVED');
-export const PGBASE_CONTEXT_STORE = Symbol('PGBASE_CONTEXT_STORE');
-export const PGBASE_CLAIMS_CACHE = Symbol('PGBASE_CLAIMS_CACHE');
-export const PGBASE_WIRE_CODEC = Symbol('PGBASE_WIRE_CODEC');
 
 export interface Resolved {
   readonly schema: ResolvedSchema;

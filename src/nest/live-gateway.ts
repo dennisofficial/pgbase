@@ -6,20 +6,15 @@ import {
   type OnApplicationShutdown,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import { MemoryClaimsCache, type ContextStore } from '../context/index.js';
-import { DEFAULT_ARGS_TREE_LIMITS, type WireCodec } from '../read/index.js';
+import { AsyncLocalStorageContextStore, MemoryClaimsCache } from '../context/index.js';
+import { DEFAULT_ARGS_TREE_LIMITS } from '../read/index.js';
 import type { PgbaseLiveRuntimeOptions } from './live-runtime.js';
 import { PgbaseLiveRuntime } from './live-runtime.js';
 import { PgbaseReadService } from './read-service.js';
 import type { Resolved } from './tokens.js';
-import {
-  PGBASE_CLAIMS_CACHE,
-  PGBASE_CONTEXT_STORE,
-  PGBASE_OPTIONS,
-  PGBASE_RESOLVED,
-  PGBASE_WIRE_CODEC,
-} from './tokens.js';
+import { PGBASE_OPTIONS, PGBASE_RESOLVED } from './tokens.js';
 import type { PgbaseModuleOptions } from './types.js';
+import { PgbaseWireCodecService } from './wire-codec.js';
 
 @Injectable()
 export class PgbaseLiveGateway implements OnApplicationBootstrap, OnApplicationShutdown {
@@ -28,9 +23,9 @@ export class PgbaseLiveGateway implements OnApplicationBootstrap, OnApplicationS
   constructor(
     @Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions,
     @Inject(PGBASE_RESOLVED) private readonly resolved: Resolved,
-    @Inject(PGBASE_CONTEXT_STORE) private readonly contextStore: ContextStore,
-    @Inject(PGBASE_CLAIMS_CACHE) private readonly claimsCache: MemoryClaimsCache,
-    @Inject(PGBASE_WIRE_CODEC) private readonly wire: WireCodec,
+    private readonly contextStore: AsyncLocalStorageContextStore,
+    private readonly claimsCache: MemoryClaimsCache,
+    private readonly wire: PgbaseWireCodecService,
     private readonly reads: PgbaseReadService,
     @Optional() private readonly httpAdapterHost?: HttpAdapterHost,
   ) {}

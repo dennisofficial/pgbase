@@ -1,8 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { requireContext, type ContextStore } from '../context/index.js';
+import { AsyncLocalStorageContextStore, requireContext } from '../context/index.js';
 import { DEFAULT_READ_LIMITS, applyPlan, scopeRead, type ReadArgs } from '../read/index.js';
 import type { Resolved } from './tokens.js';
-import { PGBASE_CONTEXT_STORE, PGBASE_OPTIONS, PGBASE_RESOLVED, delegateName } from './tokens.js';
+import { PGBASE_OPTIONS, PGBASE_RESOLVED, delegateName } from './tokens.js';
 import type { PgbaseModuleOptions } from './types.js';
 
 @Injectable()
@@ -10,7 +10,7 @@ export class PgbaseReadService {
   constructor(
     @Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions,
     @Inject(PGBASE_RESOLVED) private readonly resolved: Resolved,
-    @Inject(PGBASE_CONTEXT_STORE) private readonly contextStore: ContextStore,
+    private readonly contextStore: AsyncLocalStorageContextStore,
   ) {}
 
   async read(model: string, args: ReadArgs): Promise<unknown> {

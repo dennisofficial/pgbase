@@ -6,8 +6,11 @@
 // below or it initialises in production mode regardless of what this line says.
 process.env.NODE_ENV = 'development';
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { createRoot as CreateRoot } from 'react-dom/client';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createClient, type LiveSocket, type ModelAccessor } from '../../client/index.js';
+import { PGBASE_SUBSCRIBE, PGBASE_UNSUBSCRIBE } from '../../live/protocol.js';
+import { useLiveQuery } from '../index.js';
 
 type Root = ReturnType<typeof CreateRoot>;
 
@@ -21,9 +24,10 @@ beforeAll(async () => {
   ({ StrictMode, act, createElement } = await import('react'));
   ({ createRoot } = await import('react-dom/client'));
 });
-import { PgbaseClient, type LiveSocket } from '../../client/index.js';
-import { PGBASE_SUBSCRIBE, PGBASE_UNSUBSCRIBE } from '../../live/protocol.js';
-import { useLiveQuery } from '../index.js';
+
+interface Job {
+  readonly id: number;
+}
 
 interface Sent {
   readonly event: string;
@@ -66,13 +70,19 @@ function fakeSocket() {
   } as unknown as LiveSocket;
 
   const count = (event: string) => sent.filter((s) => s.event === event).length;
-  const issuedIds = () => sent.filter((s) => s.event === PGBASE_SUBSCRIBE).map((_, i) => `sub-${i + 1}`);
+  const issuedIds = () =>
+    sent.filter((s) => s.event === PGBASE_SUBSCRIBE).map((_, i) => `sub-${i + 1}`);
   const emitDelta = (subscriptionId: string, row: Record<string, unknown>) => {
     for (const l of listeners.get('pgbase:delta') ?? []) {
       l({ json: { kind: 'upsert', subscriptionId, row }, meta: undefined });
     }
   };
   return { socket, sent, count, issuedIds, emitDelta };
+}
+
+function fakeAccessor(socket: LiveSocket): ModelAccessor<Job> {
+  const db = createClient<{ Job: Job }>({ baseUrl: 'http://test', createSocket: () => socket });
+  return db.Job;
 }
 
 let container: HTMLDivElement;
@@ -89,8 +99,8 @@ afterEach(() => {
   container.remove();
 });
 
-function Probe({ client }: { client: PgbaseClient }) {
-  const rows = useLiveQuery(client, 'Job');
+function Probe({ accessor }: { accessor: ModelAccessor<Job> }) {
+  const rows = useLiveQuery(accessor);
   return createElement('span', null, String(rows.length));
 }
 
@@ -101,10 +111,10 @@ describe('useLiveQuery', () => {
     // handle that was closed, while a second, orphaned subscription stays bound server-side and
     // absorbs the deltas — the UI goes quiet with nothing in the console to explain it.
     const { socket, count, issuedIds, emitDelta } = fakeSocket();
-    const client = new PgbaseClient({ socket });
+    const accessor = fakeAccessor(socket);
 
     await act(async () => {
-      root.render(createElement(StrictMode, null, createElement(Probe, { client })));
+      root.render(createElement(StrictMode, null, createElement(Probe, { accessor })));
     });
 
     // Deliver a row on every subscription the client ever opened. Whichever one is still bound,
@@ -120,10 +130,10 @@ describe('useLiveQuery', () => {
 
   it('closes its subscription when the component unmounts', async () => {
     const { socket, count } = fakeSocket();
-    const client = new PgbaseClient({ socket });
+    const accessor = fakeAccessor(socket);
 
     await act(async () => {
-      root.render(createElement(Probe, { client }));
+      root.render(createElement(Probe, { accessor }));
     });
     expect(count(PGBASE_SUBSCRIBE) - count(PGBASE_UNSUBSCRIBE)).toBe(1);
 
@@ -134,15 +144,15 @@ describe('useLiveQuery', () => {
     expect(count(PGBASE_SUBSCRIBE) - count(PGBASE_UNSUBSCRIBE)).toBe(0);
   });
 
-  it('subscribes nothing until a client exists', async () => {
+  it('subscribes nothing until an accessor exists', async () => {
     const { socket, count } = fakeSocket();
     void socket;
-    function NoClient() {
-      const rows = useLiveQuery(null, 'Job');
+    function NoAccessor() {
+      const rows = useLiveQuery<Job>(null);
       return createElement('span', null, String(rows.length));
     }
     await act(async () => {
-      root.render(createElement(NoClient));
+      root.render(createElement(NoAccessor));
     });
     expect(count(PGBASE_SUBSCRIBE)).toBe(0);
   });

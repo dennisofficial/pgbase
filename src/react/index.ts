@@ -1,36 +1,37 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import type { LiveQueryHandle, PgbaseClient } from '../client/index.js';
+import type { LiveArgs, ModelAccessor, Subscription } from '../client/index.js';
 
 const EMPTY: readonly never[] = Object.freeze([]);
 
 const NOOP = (): void => {};
 
-export function useLiveQuery<T = unknown>(
-  client: PgbaseClient | null | undefined,
-  model: string,
-  where?: Record<string, unknown>,
+export function useLiveQuery<T>(
+  accessor: ModelAccessor<T> | null | undefined,
+  args?: LiveArgs,
 ): readonly T[] {
-  const whereKey = JSON.stringify(where ?? {});
-  const [handle, setHandle] = useState<LiveQueryHandle<T> | null>(null);
+  const whereKey = JSON.stringify(args?.where ?? {});
+  const [subscription, setSubscription] = useState<Subscription<T> | null>(null);
 
   useEffect(() => {
-    if (!client) return;
-    const live = client.liveQuery<T>(model, where);
-    setHandle(live);
+    if (!accessor) return;
+    const sub = accessor.createSubscription();
+    setSubscription(sub);
+    void sub.query({ where: args?.where });
     return () => {
       // Drop the reference before closing, so a render in between cannot read a dead handle.
-      setHandle((current) => (current === live ? null : current));
-      live.close();
+      setSubscription((current) => (current === sub ? null : current));
+      sub.close();
     };
-  }, [client, model, whereKey]);
+  }, [accessor, whereKey]);
 
   const subscribe = useCallback(
-    (listener: () => void) => (handle ? handle.subscribe(listener) : NOOP),
-    [handle],
+    (onStoreChange: () => void) =>
+      subscription ? subscription.subscribe(() => onStoreChange()) : NOOP,
+    [subscription],
   );
   const getSnapshot = useCallback(
-    () => (handle ? handle.getSnapshot() : (EMPTY as readonly T[])),
-    [handle],
+    () => (subscription ? subscription.getSnapshot() : (EMPTY as readonly T[])),
+    [subscription],
   );
 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);

@@ -13,7 +13,7 @@ import { PGBASE_DELTA, PGBASE_SUBSCRIBE, PGBASE_UNSUBSCRIBE } from '../../live/p
 import type { Delta } from '../../live/types.js';
 import { definePolicy } from '../../policy/define.js';
 import { validatePolicies } from '../../policy/index.js';
-import { createWireCodec, type ReadArgs } from '../../read/index.js';
+import { PgbaseWireCodec, type ReadArgs } from '../../read/index.js';
 import { createTestPool } from '../../schema/test-support.js';
 import type { ResolvedModel } from '../../schema/types.js';
 import { SCHEMA_FORMAT_VERSION } from '../../version.js';
@@ -105,7 +105,7 @@ let pool: Pool;
 let model: ResolvedModel;
 let resolved: Resolved;
 let moduleOptions: PgbaseModuleOptions<string, Claims>;
-const wire = createWireCodec({ decimalConstructor: (v: string) => new FakeDecimal(v) });
+const wire = new PgbaseWireCodec({ decimalConstructor: (v: string) => new FakeDecimal(v) });
 
 /**
  * A fresh `http.Server` per test — `PgbaseLiveRuntime.stop()` closes the HTTP server it was
@@ -175,7 +175,7 @@ function buildRuntime(
     policies: resolved.policies,
     reads,
     contextStore,
-    claims: new MemoryClaimsCache(new StaticClaimsBuilder()),
+    claims: new MemoryClaimsCache({ ...moduleOptions, claimsBuilder: new StaticClaimsBuilder() }),
     wire,
     getPrincipal,
     wal: {

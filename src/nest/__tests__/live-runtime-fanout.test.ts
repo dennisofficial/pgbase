@@ -12,7 +12,7 @@ import { PGBASE_DELTA, PGBASE_SUBSCRIBE } from '../../live/protocol.js';
 import type { Delta } from '../../live/types.js';
 import { definePolicy } from '../../policy/define.js';
 import { validatePolicies } from '../../policy/index.js';
-import { createWireCodec } from '../../read/index.js';
+import { PgbaseWireCodec } from '../../read/index.js';
 import { createTestPool } from '../../schema/test-support.js';
 import type { ResolvedModel } from '../../schema/types.js';
 import { PostgresChangeTransport } from '../../transport/postgres.js';
@@ -72,7 +72,7 @@ let pool: Pool;
 let model: ResolvedModel;
 let resolved: Resolved;
 let moduleOptions: PgbaseModuleOptions<string, Claims>;
-const wire = createWireCodec();
+const wire = new PgbaseWireCodec();
 
 async function startHttpServer(): Promise<{ httpServer: NodeHttpServer; baseUrl: string }> {
   const httpServer = createServer();
@@ -117,7 +117,7 @@ function buildRuntime(
     policies: resolved.policies,
     reads,
     contextStore,
-    claims: new MemoryClaimsCache(new StaticClaimsBuilder()),
+    claims: new MemoryClaimsCache({ ...moduleOptions, claimsBuilder: new StaticClaimsBuilder() }),
     wire,
     getPrincipal,
     wal: {

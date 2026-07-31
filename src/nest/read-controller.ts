@@ -5,11 +5,11 @@ import {
   checkArgsTreeBounds,
   type ArgsTreeLimits,
   type ReadArgs,
-  type WireCodec,
 } from '../read/index.js';
 import { PgbaseReadService } from './read-service.js';
-import { PGBASE_OPTIONS, PGBASE_WIRE_CODEC } from './tokens.js';
+import { PGBASE_OPTIONS } from './tokens.js';
 import type { PgbaseModuleOptions } from './types.js';
+import { PgbaseWireCodecService } from './wire-codec.js';
 
 const KNOWN_ARG_KEYS = new Set([
   'where',
@@ -72,7 +72,7 @@ export function createPgbaseReadController(prefix: string): Type<unknown> {
     constructor(
       private readonly reads: PgbaseReadService,
       @Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions,
-      @Inject(PGBASE_WIRE_CODEC) private readonly wire: WireCodec,
+      private readonly wire: PgbaseWireCodecService,
     ) {}
 
     @Post('read')

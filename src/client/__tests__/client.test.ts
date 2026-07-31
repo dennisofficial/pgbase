@@ -123,7 +123,10 @@ async function startRuntime(): Promise<{ runtime: PgbaseLiveRuntime; baseUrl: st
   const { httpServer, baseUrl } = await startHttpServer();
   const contextStore = new AsyncLocalStorageContextStore();
   const reads = new PgbaseReadService(moduleOptions, resolved, contextStore);
-  const claims = new MemoryClaimsCache(new StaticClaimsBuilder());
+  const claims = new MemoryClaimsCache({
+    ...moduleOptions,
+    claimsBuilder: new StaticClaimsBuilder(),
+  });
   const wire = new PgbaseWireCodec();
   attachReadEndpoint(httpServer, reads, contextStore, wire, claims);
 

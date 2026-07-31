@@ -30,6 +30,7 @@ import {
   type WireCodec,
 } from '../read/index.js';
 import type { ResolvedModel, ResolvedSchema } from '../schema/types.js';
+import type { ChangeTransport } from '../transport/types.js';
 import { createWalLeader } from '../wal/leader.js';
 import type { WalLeader, WalLeaderStats } from '../wal/types.js';
 import type { PgbaseReadService } from './read-service.js';
@@ -56,9 +57,9 @@ export interface PgbaseLiveRuntimeOptions {
   readonly argsLimits?: ArgsTreeLimits;
   readonly readLimits?: ReadLimits;
   readonly socketIoOptions?: Partial<ServerOptions>;
+  readonly transport?: ChangeTransport;
 }
 
-/** How long a subscribe waits for the leader to start streaming before giving up on this instance. */
 const STREAMING_GRACE_MS = 5_000;
 
 interface SocketState {
@@ -88,6 +89,7 @@ export class PgbaseLiveRuntime {
   private readonly bySocket = new Map<string, SocketState>();
 
   private stopSink: (() => void) | null = null;
+  private stopTransportListener: (() => void) | null = null;
 
   constructor(private readonly opts: PgbaseLiveRuntimeOptions) {
     this.router = new DefaultChangeRouter(this.registry);
@@ -107,13 +109,26 @@ export class PgbaseLiveRuntime {
     return this.leader.stats;
   }
 
-  /** Live subscription count across every connected socket — for tests and ops metrics. */
   get subscriptionCount(): number {
     return this.registry.size;
   }
 
   async start(): Promise<void> {
-    this.leader.on((event) => this.sink.push(event));
+    const transport = this.opts.transport;
+    if (transport) {
+      this.leader.on((event) => {
+        void Promise.resolve(transport.publish(event)).catch((err) => {
+          console.warn(
+            `[pgbase] transport publish failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      });
+      this.stopTransportListener = transport.onEvent((event) => this.sink.push(event));
+      await transport.start();
+    } else {
+      this.leader.on((event) => this.sink.push(event));
+    }
+
     this.stopSink = this.sink.onEvent((event) => {
       const result =
         event.type === 'change'
@@ -136,6 +151,8 @@ export class PgbaseLiveRuntime {
     this.io.removeAllListeners();
     await new Promise<void>((resolve) => this.io.close(() => resolve()));
     this.stopSink?.();
+    this.stopTransportListener?.();
+    await this.opts.transport?.stop();
     await this.leader.stop();
   }
 
@@ -194,18 +211,15 @@ export class PgbaseLiveRuntime {
         model,
       );
 
-      // Only the instance holding the replication slot receives WAL. Any other one can still run
-      // the snapshot query and hand back a perfectly good initial result, then never send a single
-      // delta — a subscription that looks healthy and is silently dead. Right after a restart this
-      // is the normal state for as long as the previous holder's connection takes to expire
-      // (`wal_sender_timeout`), so wait briefly, then refuse rather than ack a lie.
-      await this.awaitStreaming();
-      if (this.leader.stats.state !== 'streaming') {
-        throw new Error(
-          `This instance is not streaming replication (leader state: ${this.leader.stats.state}), ` +
-            `so it cannot deliver live changes. Another instance holds the replication slot, or ` +
-            `this one is still acquiring it. Reconnect to retry.`,
-        );
+      if (!this.opts.transport) {
+        await this.awaitStreaming();
+        if (this.leader.stats.state !== 'streaming') {
+          throw new Error(
+            `This instance is not streaming replication (leader state: ${this.leader.stats.state}), ` +
+              `so it cannot deliver live changes. Another instance holds the replication slot, or ` +
+              `this one is still acquiring it. Reconnect to retry.`,
+          );
+        }
       }
 
       id = randomUUID();
@@ -234,11 +248,6 @@ export class PgbaseLiveRuntime {
         () => this.opts.reads.read(model, { where: clientWhere }),
       )) as readonly Record<string, unknown>[];
 
-      // The snapshot is capped at `maxRows`, but the live predicate is not: a change to any
-      // matching row is routed, including rows the cap excluded. A client would then hold its
-      // first `maxRows` rows plus an arbitrary scattering of later ones — a set matching no read.
-      // Live queries have no cursor yet (DESIGN §8), so there is no correct way to serve this;
-      // refuse it rather than hand back a cache that is quietly wrong.
       const maxRows = (this.opts.readLimits ?? DEFAULT_READ_LIMITS).maxRows;
       if (rows.length >= maxRows) {
         throw new Error(

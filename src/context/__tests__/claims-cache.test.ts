@@ -1,5 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { PgbaseModuleOptions } from '../../nest/types.js';
+import type { MemoryClaimsCacheOptions } from '../claims-cache.js';
 import { MemoryClaimsCache } from '../claims-cache.js';
 import type { ClaimsBuilder } from '../types.js';
 
@@ -10,8 +12,6 @@ interface Claims {
   readonly orgId: string;
 }
 
-/** A builder whose `build()` never resolves on its own — the test controls each call's
- * resolution individually via `resolvers`. */
 function deferredBuilder(ttlMs?: number) {
   const resolvers: Array<(claims: Claims) => void> = [];
   const rejecters: Array<(err: unknown) => void> = [];
@@ -29,6 +29,16 @@ function deferredBuilder(ttlMs?: number) {
   return { builder, resolvers, rejecters, calls };
 }
 
+function cacheFor(
+  claimsBuilder: ClaimsBuilder<Principal, Claims>,
+  claimsCacheOptions?: MemoryClaimsCacheOptions,
+) {
+  return new MemoryClaimsCache<Principal, Claims>({
+    claimsBuilder,
+    claimsCacheOptions,
+  } as unknown as PgbaseModuleOptions<Principal, Claims>);
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -44,7 +54,7 @@ describe('MemoryClaimsCache — single-flight', () => {
         return { orgId: `org-of-${p.userId}` };
       },
     };
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
     const principal: Principal = { userId: 'u1' };
 
     const results = await Promise.all(Array.from({ length: 20 }, () => cache.get(principal)));
@@ -66,7 +76,7 @@ describe('MemoryClaimsCache — single-flight', () => {
         return { orgId: `org-of-${p.userId}` };
       },
     };
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
     const principal: Principal = { userId: 'u1' };
 
     const [r1, r2, r3] = await Promise.allSettled([
@@ -96,7 +106,7 @@ describe('MemoryClaimsCache — TTL', () => {
         return { orgId: `org-${p.userId}-${attempt}` };
       },
     };
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
     const principal: Principal = { userId: 'u1' };
     const now = Date.now();
     const spy = vi.spyOn(Date, 'now').mockReturnValue(now);
@@ -124,7 +134,7 @@ describe('MemoryClaimsCache — TTL', () => {
         return { orgId: `org-${p.userId}-${attempt}` };
       },
     };
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
     const principal: Principal = { userId: 'u1' };
     const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
 
@@ -143,7 +153,7 @@ describe('MemoryClaimsCache — LRU eviction', () => {
       key: (p) => p.userId,
       build: async (p) => ({ orgId: `org-${p.userId}` }),
     };
-    const cache = new MemoryClaimsCache(builder, { maxSize: 2 });
+    const cache = cacheFor(builder, { maxSize: 2 });
 
     await cache.get({ userId: 'a' });
     await cache.get({ userId: 'b' });
@@ -163,7 +173,7 @@ describe('MemoryClaimsCache — LRU eviction', () => {
 describe('MemoryClaimsCache — invalidate during an in-flight build', () => {
   it('a joined caller still resolves with the in-flight result, but it is never cached', async () => {
     const { builder, resolvers, calls } = deferredBuilder();
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
 
     const pending = cache.get({ userId: 'u1' });
     cache.invalidate('u1');
@@ -179,7 +189,7 @@ describe('MemoryClaimsCache — invalidate during an in-flight build', () => {
 
   it('get() after invalidate() during an in-flight build starts a fresh build, not a join', async () => {
     const { builder, resolvers, calls } = deferredBuilder();
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
 
     const pending1 = cache.get({ userId: 'u1' });
     cache.invalidate('u1');
@@ -199,7 +209,7 @@ describe('MemoryClaimsCache — invalidate during an in-flight build', () => {
 
   it('an invalidated build resolving AFTER a fresher one does not clobber the cache', async () => {
     const { builder, resolvers } = deferredBuilder();
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
 
     const pending1 = cache.get({ userId: 'u1' }); // build #1
     cache.invalidate('u1');
@@ -216,7 +226,7 @@ describe('MemoryClaimsCache — invalidate during an in-flight build', () => {
 
   it('invalidateAll() clears the cache and every in-flight build for every key', async () => {
     const { builder, resolvers, calls } = deferredBuilder();
-    const cache = new MemoryClaimsCache(builder);
+    const cache = cacheFor(builder);
 
     const pendingA = cache.get({ userId: 'a' });
     const pendingB = cache.get({ userId: 'b' });

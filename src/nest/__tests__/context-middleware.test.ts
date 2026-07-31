@@ -5,9 +5,11 @@ import type { PgbaseModuleOptions } from '../types.js';
 
 function build(getPrincipal: (req: unknown) => unknown) {
   const claimsCache = new MemoryClaimsCache({
-    key: (p) => String(p),
-    build: async () => ({ ok: true }),
-  });
+    claimsBuilder: {
+      key: (p: unknown) => String(p),
+      build: async () => ({ ok: true }),
+    },
+  } as unknown as PgbaseModuleOptions);
   const store = new AsyncLocalStorageContextStore();
   const middleware = new PgbaseContextMiddleware(
     { getPrincipal } as unknown as PgbaseModuleOptions,
