@@ -112,7 +112,7 @@ describe('validatePolicies — omit must not hide every column', () => {
 });
 
 describe('validatePolicies — REPLICA IDENTITY vs filterable-not-subset-of-PK', () => {
-  it('fires on AuditLog (not FULL) when a non-PK column is left visible', async () => {
+  it('warns but does not refuse to boot when a large non-PK column is visible off FULL', async () => {
     const schema = await resolveOne(pool, AUDIT_LOG_MODEL);
     const registry = {
       AuditLog: definePolicy<Row, unknown>('AuditLog')({
@@ -121,8 +121,18 @@ describe('validatePolicies — REPLICA IDENTITY vs filterable-not-subset-of-PK',
       }),
     };
 
-    expect(() => validatePolicies(schema, registry)).toThrow(/AuditLog.*action/s);
-    expect(() => validatePolicies(schema, registry)).toThrow(/REPLICA IDENTITY/);
+    const warnings: string[] = [];
+    const original = console.warn;
+    console.warn = (msg: string) => void warnings.push(msg);
+    try {
+      // Membership is decided from the post-image alone, so DEFAULT identity is CORRECT here —
+      // it only costs a resync when an untouched TOASTed value is omitted from the WAL.
+      expect(() => validatePolicies(schema, registry)).not.toThrow();
+    } finally {
+      console.warn = original;
+    }
+    expect(warnings.join('\n')).toMatch(/AuditLog.*action/s);
+    expect(warnings.join('\n')).toMatch(/REPLICA IDENTITY FULL/);
   });
 
   it('does not fire on Membership (FULL) even though `role` is outside the composite PK', async () => {

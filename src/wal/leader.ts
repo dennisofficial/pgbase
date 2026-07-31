@@ -25,6 +25,7 @@ import {
 const DEFAULT_ACQUIRE_RETRY_MS = 300;
 const DEFAULT_STATUS_INTERVAL_MS = 10_000;
 const ACQUIRE_ATTEMPT_TIMEOUT_MS = 5_000;
+const STOP_STEP_TIMEOUT_MS = 2_000;
 
 export interface WalLeaderDependencies {
   readonly pool: Pool;
@@ -135,17 +136,39 @@ class PgWalLeader implements WalLeader {
     for (const wake of this.stopWaiters.splice(0)) wake();
 
     this.stopStatusInterval();
-    if (this.service) {
-      await this.service
-        .acknowledge(this.lastCommitEndLsn ?? this.service.lastLsn())
-        .catch(() => {});
+    const service = this.service;
+    if (service) {
+      // Only a leader that actually streamed has a position worth reporting, and only it has a
+      // live connection to report it on. Acknowledging from `acquiring` writes a status update to
+      // a connection that is still mid-handshake, which never settles.
+      if (this.everStreamed) {
+        await this.withDeadline(
+          service.acknowledge(this.lastCommitEndLsn ?? service.lastLsn()),
+          STOP_STEP_TIMEOUT_MS,
+        );
+      }
+      await this.withDeadline(service.stop(), STOP_STEP_TIMEOUT_MS);
     }
-    if (this.service) await this.service.stop().catch(() => {});
-    if (this.loopPromise) await this.loopPromise.catch(() => {});
+    if (this.loopPromise) await this.withDeadline(this.loopPromise, STOP_STEP_TIMEOUT_MS);
 
     this.service = null;
     this.currentPlugin = null;
     this.setState('stopped');
+  }
+
+  private async withDeadline(work: Promise<unknown>, ms: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      await Promise.race([
+        work.catch(() => {}),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, ms);
+          timer.unref?.();
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   // ── validation ──────────────────────────────────────────────────────────────────────────────
@@ -270,6 +293,7 @@ class PgWalLeader implements WalLeader {
       };
 
       await this.reconcileSlot();
+      if (this.stopped) break;
       const plugin = new WalPgoutputPlugin(this.options.publication);
       this.currentPlugin = plugin;
       const service = this.service!;

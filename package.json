@@ -107,6 +107,16 @@
         "types": "./src/wal/index.ts",
         "default": "./dist/wal/index.js"
       }
+    },
+    "./live": {
+      "import": {
+        "types": "./src/live/index.ts",
+        "default": "./dist/live/index.mjs"
+      },
+      "require": {
+        "types": "./src/live/index.ts",
+        "default": "./dist/live/index.js"
+      }
     }
   },
   "files": [

@@ -25,6 +25,7 @@ export default defineConfig({
     'src/context/index.ts',
     'src/read/index.ts',
     'src/wal/index.ts',
+    'src/live/index.ts',
     'src/generator/bin.ts',
   ],
   format: ['cjs', 'esm'],

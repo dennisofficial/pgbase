@@ -54,6 +54,16 @@ export function validatePolicies(
   return result;
 }
 
+/** Types large enough to be stored out-of-line, where an UPDATE can omit the value entirely. */
+const TOASTABLE_TYPE_OIDS = new Set([
+  17, // bytea
+  25, // text
+  114, // json
+  1042, // bpchar
+  1043, // varchar
+  3802, // jsonb
+]);
+
 function checkReplicaIdentity(model: ResolvedModel, probeResult: ProbeResult): void {
   if (model.replicaIdentity === 'full') return;
 
@@ -62,15 +72,23 @@ function checkReplicaIdentity(model: ResolvedModel, probeResult: ProbeResult): v
       .map((column) => model.byColumn.get(column)?.name)
       .filter((n): n is string => n !== undefined),
   );
-  const offending = [...probeResult.filterable].filter((name) => !pkFieldNames.has(name)).sort();
-  if (offending.length === 0) return;
+  const toastable = [...probeResult.filterable]
+    .filter((name) => !pkFieldNames.has(name))
+    .filter((name) => {
+      const field = model.fields.find((f) => f.name === name);
+      return (
+        field !== undefined &&
+        (TOASTABLE_TYPE_OIDS.has(field.typeOid) || field.elementTypeOid !== null)
+      );
+    })
+    .sort();
+  if (toastable.length === 0) return;
 
-  throw new PolicyValidationError(
-    `Model "${model.model}" is filterable on column(s) ${offending.join(', ')}, which are not ` +
-      `part of its primary key, but the table is not REPLICA IDENTITY FULL. Without FULL, an ` +
-      `UPDATE's old tuple carries only the key, so the leader cannot tell whether a row left a ` +
-      `subscription's filter — the row would go stale on clients instead of being removed. Run ` +
-      `ALTER TABLE ... REPLICA IDENTITY FULL, or omit those columns so only primary-key columns ` +
-      `remain visible.`,
+  console.warn(
+    `[pgbase] Model "${model.model}" allows filtering on potentially large column(s) ` +
+      `${toastable.join(', ')} and the table is not REPLICA IDENTITY FULL. An UPDATE that does ` +
+      `not touch such a column omits its value from the WAL, leaving live subscriptions unable to ` +
+      `evaluate the predicate — they will resync instead. If that table is updated often, either ` +
+      `run ALTER TABLE "${model.table}" REPLICA IDENTITY FULL or omit those columns from the policy.`,
   );
 }
