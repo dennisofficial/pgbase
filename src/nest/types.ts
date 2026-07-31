@@ -1,4 +1,4 @@
-import type { FactoryProvider, ModuleMetadata } from '@nestjs/common';
+import type { FactoryProvider, ModuleMetadata, Type } from '@nestjs/common';
 import type { Pool } from 'pg';
 import type { ServerOptions } from 'socket.io';
 import type { ClaimsBuilder, MemoryClaimsCacheOptions } from '../context/index.js';
@@ -6,6 +6,7 @@ import type { PolicyEntry } from '../policy/index.js';
 import type { ArgsTreeLimits, ReadLimits, WireCustomType } from '../read/index.js';
 import type { StaticSchema } from '../schema/index.js';
 import type { LiveWalOptions } from './live-runtime.js';
+import type { PgbaseSchemaProvider } from './schema-registry.js';
 import type { ScopedPrismaTokenClass } from './scoped-prisma.js';
 
 export interface PgbaseLiveOptions extends LiveWalOptions {
@@ -40,6 +41,7 @@ export interface PgbaseModuleOptions<
   readonly publication?: string;
   readonly scopedPrisma?: ScopedPrismaTokenClass<Client, Registry>;
   readonly routePrefix?: string;
+  readonly schemaProvider?: Type<PgbaseSchemaProvider>;
   readonly getPrincipal: (req: unknown) => Principal;
   readonly live?: PgbaseLiveOptions;
 }
@@ -52,7 +54,10 @@ export type PgbaseRuntimeOptions<
     string,
     PolicyEntry<any, any, any>
   >,
-> = Omit<PgbaseModuleOptions<Principal, Claims, Client, Registry>, 'scopedPrisma' | 'routePrefix'>;
+> = Omit<
+  PgbaseModuleOptions<Principal, Claims, Client, Registry>,
+  'scopedPrisma' | 'routePrefix' | 'schemaProvider'
+>;
 
 export interface PgbaseModuleAsyncOptions<
   Principal = unknown,
@@ -72,4 +77,6 @@ export interface PgbaseModuleAsyncOptions<
     | Promise<PgbaseRuntimeOptions<Principal, Claims, Client, Registry>>;
   readonly scopedPrisma?: ScopedPrismaTokenClass<Client, Registry>;
   readonly routePrefix?: string;
+  /** Bound synchronously when the module is defined, so it cannot come from `useFactory`. */
+  readonly schemaProvider?: Type<PgbaseSchemaProvider>;
 }

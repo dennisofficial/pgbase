@@ -169,6 +169,9 @@ importers:
       next:
         specifier: ^15.5.22
         version: 15.5.22(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      nextjs:
+        specifier: ^0.0.3
+        version: 0.0.3
       react:
         specifier: ^19.2.8
         version: 19.2.8
@@ -2892,6 +2895,10 @@ packages:
         optional: true
       sass:
         optional: true
+
+  nextjs@0.0.3:
+    resolution: {integrity: sha512-mYbDUo4/sRAZ8TqK63PCpYnFiLg7BICG/ot9+guOrUKd4/Fo71ZmEQ41IZbH6nqbQvG7SXTBuofJXAIWfNho0w==}
+    engines: {node: '>=0.8.21'}
 
   node-abort-controller@3.1.1:
     resolution: {integrity: sha512-AGK2yQKIjRuqnc6VkX2Xj5d+QW8xZ87pa1UK6yA6ouUyuxfHuMP6umE5QK7UmTeOAymo+Zx1Fxiuw9rVx8taHQ==}
@@ -6580,6 +6587,8 @@ snapshots:
     transitivePeerDependencies:
       - '@babel/core'
       - babel-plugin-macros
+
+  nextjs@0.0.3: {}
 
   node-abort-controller@3.1.1: {}
 

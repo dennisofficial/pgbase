@@ -17,36 +17,43 @@ export interface WireCodecOptions {
   readonly decimalConstructor?: (value: string) => unknown;
 }
 
-function isDecimalLike(value: unknown): value is { toFixed(): string } {
-  if (typeof value !== 'object' || value === null) return false;
-  const v = value as Record<string, unknown>;
-  return (
-    typeof v.toFixed === 'function' &&
-    typeof v.s === 'number' &&
-    typeof v.e === 'number' &&
-    Array.isArray(v.d)
-  );
-}
+type DecimalLike = { toFixed(): string };
 
-export function createWireCodec(options: WireCodecOptions = {}): WireCodec {
-  const codec = new SuperJSON();
+export class PgbaseWireCodec extends SuperJSON {
+  constructor(options: WireCodecOptions = {}) {
+    super();
+    this.registerDecimal(options.decimalConstructor);
+    this.registerSerializers(options.serializers ?? []);
+  }
 
-  codec.registerCustom(
-    {
-      isApplicable: isDecimalLike,
-      serialize: (value) => value.toFixed(),
-      deserialize: (value: string) =>
-        (options.decimalConstructor?.(value) ?? value) as { toFixed(): string },
-    },
-    'pgbase.Decimal',
-  );
-
-  for (const t of options.serializers ?? []) {
-    codec.registerCustom(
-      { isApplicable: t.isApplicable, serialize: t.serialize, deserialize: t.deserialize },
-      t.name,
+  private registerDecimal(construct: WireCodecOptions['decimalConstructor']): void {
+    this.registerCustom(
+      {
+        isApplicable: PgbaseWireCodec.isDecimalLike,
+        serialize: (value) => value.toFixed(),
+        deserialize: (value: string) => (construct?.(value) ?? value) as DecimalLike,
+      },
+      'pgbase.Decimal',
     );
   }
 
-  return codec;
+  private registerSerializers(serializers: readonly WireCustomType[]): void {
+    for (const t of serializers) {
+      this.registerCustom(
+        { isApplicable: t.isApplicable, serialize: t.serialize, deserialize: t.deserialize },
+        t.name,
+      );
+    }
+  }
+
+  private static isDecimalLike(value: unknown): value is DecimalLike {
+    if (typeof value !== 'object' || value === null) return false;
+    const v = value as Record<string, unknown>;
+    return (
+      typeof v.toFixed === 'function' &&
+      typeof v.s === 'number' &&
+      typeof v.e === 'number' &&
+      Array.isArray(v.d)
+    );
+  }
 }

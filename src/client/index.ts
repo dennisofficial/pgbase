@@ -1,6 +1,6 @@
 export { createClient } from './create-client.js';
 export { PgbaseHttpError, PgbaseSubscribeError } from './errors.js';
-export { liveQueryEndpoint } from './rtk.js';
+export { isLiveSerializable, liveQueryEndpoint } from './rtk.js';
 export type { LiveQueryMeta, LiveQueryResult, RtkCacheLifecycleApi } from './rtk.js';
 export type {
   ConnectionState,

@@ -2,7 +2,6 @@ import type { ValidatedPolicy } from '../policy/index.js';
 import type { ResolvedSchema } from '../schema/index.js';
 
 export const PGBASE_OPTIONS = Symbol('PGBASE_OPTIONS');
-export const PGBASE_RESOLVED = Symbol('PGBASE_RESOLVED');
 
 export interface Resolved {
   readonly schema: ResolvedSchema;

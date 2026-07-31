@@ -8,39 +8,37 @@ import {
 import { APP_FILTER } from '@nestjs/core';
 import { AsyncLocalStorageContextStore, MemoryClaimsCache } from '../context/index.js';
 import type { PolicyEntry } from '../policy/index.js';
-import { validatePolicies } from '../policy/index.js';
-import { createWireCodec } from '../read/index.js';
-import { PgCatalogSchemaProvider } from '../schema/index.js';
 import { PgbaseContextMiddleware } from './context-middleware.js';
 import { PgbaseExceptionFilter } from './exception-filter.js';
 import { PgbaseLiveGateway } from './live-gateway.js';
 import { createPgbaseReadController } from './read-controller.js';
 import { PgbaseReadService } from './read-service.js';
-import { ScopedPrismaFactory, createScopedPrismaProvider } from './scoped-prisma.js';
 import {
-  PGBASE_CLAIMS_CACHE,
-  PGBASE_CONTEXT_STORE,
-  PGBASE_OPTIONS,
-  PGBASE_RESOLVED,
-  PGBASE_WIRE_CODEC,
-  type Resolved,
-} from './tokens.js';
+  PgCatalogSchemaProviderService,
+  PgbaseSchemaProvider,
+  PgbaseSchemaRegistry,
+  schemaRegistryProvider,
+} from './schema-registry.js';
+import { ScopedPrismaFactory, createScopedPrismaProvider } from './scoped-prisma.js';
+import { PGBASE_OPTIONS } from './tokens.js';
 import type { PgbaseModuleAsyncOptions, PgbaseModuleOptions, PgbasePrismaClient } from './types.js';
+import { PgbaseWireCodecService } from './wire-codec.js';
+export { AsyncLocalStorageContextStore, MemoryClaimsCache } from '../context/index.js';
+export { PgbaseWireCodec } from '../read/index.js';
 export { PgbaseContextMiddleware } from './context-middleware.js';
 export { PgbaseExceptionFilter } from './exception-filter.js';
 export { PgbaseLiveGateway } from './live-gateway.js';
 export { PgbaseLiveRuntime } from './live-runtime.js';
 export type { LiveWalOptions, PgbaseLiveRuntimeOptions } from './live-runtime.js';
 export { PgbaseReadService } from './read-service.js';
+export {
+  PgCatalogSchemaProviderService,
+  PgbaseSchemaProvider,
+  PgbaseSchemaRegistry,
+} from './schema-registry.js';
+export { ScopedRowNotFoundError } from './scoped-errors.js';
 export { ScopedPrismaToken } from './scoped-prisma.js';
 export type { ScopedPrisma, ScopedPrismaService, ScopedPrismaTokenClass } from './scoped-prisma.js';
-export {
-  PGBASE_CLAIMS_CACHE,
-  PGBASE_CONTEXT_STORE,
-  PGBASE_OPTIONS,
-  PGBASE_RESOLVED,
-  PGBASE_WIRE_CODEC,
-} from './tokens.js';
 export type {
   PgbaseLiveOptions,
   PgbaseModuleAsyncOptions,
@@ -48,6 +46,7 @@ export type {
   PgbasePrismaClient,
   PgbaseRuntimeOptions,
 } from './types.js';
+export { PgbaseWireCodecService } from './wire-codec.js';
 
 const DEFAULT_ROUTE_PREFIX = 'pgbase';
 
@@ -66,6 +65,7 @@ export class PgbaseModule implements NestModule {
       useFactory: () => options,
       scopedPrisma: options.scopedPrisma,
       routePrefix: options.routePrefix,
+      schemaProvider: options.schemaProvider,
     });
   }
 
@@ -93,32 +93,13 @@ export class PgbaseModule implements NestModule {
           inject: options.inject ?? [],
         },
         {
-          provide: PGBASE_RESOLVED,
-          useFactory: async (opts: PgbaseModuleOptions): Promise<Resolved> => {
-            const schema = await new PgCatalogSchemaProvider(opts.schema, opts.pool, {
-              publication: opts.publication,
-            }).resolve();
-            const policies = validatePolicies(schema, opts.policies);
-            return { schema, policies };
-          },
-          inject: [PGBASE_OPTIONS],
+          provide: PgbaseSchemaProvider,
+          useClass: options.schemaProvider ?? PgCatalogSchemaProviderService,
         },
-        { provide: PGBASE_CONTEXT_STORE, useValue: new AsyncLocalStorageContextStore() },
-        {
-          provide: PGBASE_CLAIMS_CACHE,
-          useFactory: (opts: PgbaseModuleOptions) =>
-            new MemoryClaimsCache(opts.claimsBuilder, opts.claimsCacheOptions),
-          inject: [PGBASE_OPTIONS],
-        },
-        {
-          provide: PGBASE_WIRE_CODEC,
-          useFactory: (opts: PgbaseModuleOptions) =>
-            createWireCodec({
-              serializers: opts.serializers,
-              decimalConstructor: opts.decimalConstructor,
-            }),
-          inject: [PGBASE_OPTIONS],
-        },
+        schemaRegistryProvider,
+        AsyncLocalStorageContextStore,
+        MemoryClaimsCache,
+        PgbaseWireCodecService,
         PgbaseContextMiddleware,
         PgbaseReadService,
         PgbaseLiveGateway,
@@ -127,8 +108,9 @@ export class PgbaseModule implements NestModule {
       ],
       exports: [
         PgbaseReadService,
-        PGBASE_CONTEXT_STORE,
-        PGBASE_CLAIMS_CACHE,
+        PgbaseSchemaRegistry,
+        AsyncLocalStorageContextStore,
+        MemoryClaimsCache,
         ...(options.scopedPrisma ? [options.scopedPrisma] : []),
       ],
     };

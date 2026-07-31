@@ -11,8 +11,8 @@ import { DEFAULT_ARGS_TREE_LIMITS } from '../read/index.js';
 import type { PgbaseLiveRuntimeOptions } from './live-runtime.js';
 import { PgbaseLiveRuntime } from './live-runtime.js';
 import { PgbaseReadService } from './read-service.js';
-import type { Resolved } from './tokens.js';
-import { PGBASE_OPTIONS, PGBASE_RESOLVED } from './tokens.js';
+import { PgbaseSchemaRegistry } from './schema-registry.js';
+import { PGBASE_OPTIONS } from './tokens.js';
 import type { PgbaseModuleOptions } from './types.js';
 import { PgbaseWireCodecService } from './wire-codec.js';
 
@@ -22,7 +22,7 @@ export class PgbaseLiveGateway implements OnApplicationBootstrap, OnApplicationS
 
   constructor(
     @Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions,
-    @Inject(PGBASE_RESOLVED) private readonly resolved: Resolved,
+    private readonly resolved: PgbaseSchemaRegistry,
     private readonly contextStore: AsyncLocalStorageContextStore,
     private readonly claimsCache: MemoryClaimsCache,
     private readonly wire: PgbaseWireCodecService,

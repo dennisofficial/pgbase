@@ -8,11 +8,14 @@ import { QueryError } from '../query/errors.js';
 import type { ResolvedModel, ResolvedSchema } from '../schema/types.js';
 import { ReadValidationError, type ReadArgs, type ReadLimits, type ResultPlan } from './types.js';
 
+export type ReadProfile = 'client' | 'server';
+
 export interface ReadContext<Claims = unknown> {
   readonly schema: ResolvedSchema;
   readonly policies: ReadonlyMap<string, ValidatedPolicy>;
   readonly claims: Claims;
   readonly limits: ReadLimits;
+  readonly profile?: ReadProfile;
 }
 
 type Cardinality = 'root' | 'one' | 'many';
@@ -55,6 +58,7 @@ function scopeLevel<Claims>(
     );
   }
   const { policy, probeResult } = validated;
+  const trusted = ctx.profile === 'server';
 
   if (raw.select && raw.include) {
     throw new ReadValidationError(
@@ -64,18 +68,20 @@ function scopeLevel<Claims>(
     );
   }
 
-  validateScalarSelect(raw.select, model, probeResult, path);
+  if (!trusted) validateScalarSelect(raw.select, model, probeResult, path);
 
-  const clientWhere = validateWhere(raw.where, model, probeResult, path);
-  const where = scopedWhere(policy, ctx.claims, clientWhere ?? {});
+  const callerWhere = trusted ? raw.where : validateWhere(raw.where, model, probeResult, path);
+  const where = scopedWhere(policy, ctx.claims, callerWhere ?? {});
 
-  const orderBy = validateOrderBy(raw.orderBy, probeResult, model, path);
-  const cursor = validateCursor(raw.cursor, probeResult, model, path);
-  const distinct = validateDistinct(raw.distinct, probeResult, model, path);
-  const take = clampTake(raw.take, ctx.limits, model, path, cardinality);
-  const skip = validateSkip(raw.skip, model, path, cardinality);
+  const orderBy = trusted ? raw.orderBy : validateOrderBy(raw.orderBy, probeResult, model, path);
+  const cursor = trusted ? raw.cursor : validateCursor(raw.cursor, probeResult, model, path);
+  const distinct = trusted
+    ? raw.distinct
+    : validateDistinct(raw.distinct, probeResult, model, path);
+  const take = trusted ? raw.take : clampTake(raw.take, ctx.limits, model, path, cardinality);
+  const skip = trusted ? raw.skip : validateSkip(raw.skip, model, path, cardinality);
 
-  const { include, relations, hasCount } = walkRelations(model, raw, path, ctx);
+  const walked = walkRelations(model, raw, path, ctx);
 
   const args: ReadArgs = { where };
   if (orderBy !== undefined) args.orderBy = orderBy;
@@ -83,12 +89,22 @@ function scopeLevel<Claims>(
   if (distinct !== undefined) args.distinct = distinct;
   if (take !== undefined) args.take = take;
   if (skip !== undefined) args.skip = skip;
-  if (include) args.include = include;
+  if (walked.select) args.select = walked.select;
+  if (walked.include) args.include = walked.include;
 
-  const project = withCount(buildProjector(model, policy), hasCount);
-  const plan: ResultPlan = { model: model.model, project, relations };
+  const plan: ResultPlan = trusted
+    ? { model: model.model, project: passThrough, relations: new Map() }
+    : {
+        model: model.model,
+        project: withCount(buildProjector(model, policy), walked.hasCount),
+        relations: walked.relations,
+      };
 
   return { args, plan };
+}
+
+function passThrough(row: unknown): unknown {
+  return row;
 }
 
 function label(path: string): string {
@@ -290,7 +306,8 @@ function validateSkip(
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface WalkedRelations {
-  readonly include: Record<string, unknown> | undefined;
+  readonly select?: Record<string, unknown>;
+  readonly include?: Record<string, unknown>;
   readonly relations: Map<string, ResultPlan>;
   readonly hasCount: boolean;
 }
@@ -303,25 +320,34 @@ function walkRelations<Claims>(
 ): WalkedRelations {
   const source = raw.select ?? raw.include;
   const relations = new Map<string, ResultPlan>();
-  if (!source) return { include: undefined, relations, hasCount: false };
+  if (!source) return { relations, hasCount: false };
 
+  const trusted = ctx.profile === 'server';
   const isSelect = raw.select !== undefined;
   const relationsByName = new Map(model.relations.map((r) => [r.name, r] as const));
-  const include: Record<string, unknown> = {};
+  const out: Record<string, unknown> = {};
   let hasCount = false;
 
   for (const [key, value] of Object.entries(source)) {
-    if (value === false || value === undefined) continue;
+    if (value === false || value === undefined) {
+      if (trusted) out[key] = value;
+      continue;
+    }
 
     if (key === '_count') {
-      include['_count'] = buildCount(model, value, path, ctx);
+      out['_count'] = buildCount(model, value, path, ctx);
       hasCount = true;
       continue;
     }
 
     const relation = relationsByName.get(key);
     if (!relation) {
-      if (isSelect) continue; // already validated (or rejected) as a scalar field
+      if (isSelect) {
+        // A scalar field. The client profile has already validated it and drops it, because its
+        // projector needs the whole row; the server profile passes it through untouched.
+        if (trusted) out[key] = value;
+        continue;
+      }
       throw new ReadValidationError(
         model.model,
         path,
@@ -345,11 +371,16 @@ function walkRelations<Claims>(
     const cardinality: Cardinality = relation.cardinality === 'many' ? 'many' : 'one';
     const nested = scopeLevel(target, nestedRaw, nestedPath, ctx, cardinality);
 
-    include[key] = Object.keys(nested.args).length > 0 ? nested.args : true;
+    out[key] = Object.keys(nested.args).length > 0 ? nested.args : true;
     relations.set(key, nested.plan);
   }
 
-  return { include: Object.keys(include).length > 0 ? include : undefined, relations, hasCount };
+  if (Object.keys(out).length === 0) return { relations, hasCount };
+  // The client profile always rewrites to `include` — its projector decides what comes back, so it
+  // needs Prisma to return the full row. A server caller's `select` means what it says.
+  return trusted && isSelect
+    ? { select: out, relations, hasCount }
+    : { include: out, relations, hasCount };
 }
 
 function normalizeNestedValue(
@@ -426,22 +457,23 @@ function buildCount<Claims>(
           `"${relation.targetModel}", which has no client-accessible policy.`,
       );
     }
+    // `true` still needs the predicate. A relation's rows are not all in scope just because the
+    // parent row is — a Task can carry a different orgId than its Job — so an unfiltered count is a
+    // count of rows the caller cannot read.
     if (value === true) {
-      outSelect[key] = true;
+      outSelect[key] = { where: scopedWhere(targetValidated.policy, ctx.claims, {}) };
       continue;
     }
 
     const target = ctx.schema.byModel.get(relation.targetModel)!;
     const nestedPath = path ? `${path}.${key}` : key;
-    const clientWhere = (value as { where?: LiveWhere }).where;
-    const validatedWhere = validateWhere(
-      clientWhere,
-      target,
-      targetValidated.probeResult,
-      nestedPath,
-    );
+    const callerWhere = (value as { where?: LiveWhere }).where;
+    const checked =
+      ctx.profile === 'server'
+        ? callerWhere
+        : validateWhere(callerWhere, target, targetValidated.probeResult, nestedPath);
     outSelect[key] = {
-      where: scopedWhere(targetValidated.policy, ctx.claims, validatedWhere ?? {}),
+      where: scopedWhere(targetValidated.policy, ctx.claims, checked ?? {}),
     };
   }
 

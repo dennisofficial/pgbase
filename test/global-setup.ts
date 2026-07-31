@@ -9,9 +9,20 @@ export default async function setup(): Promise<void> {
     new URL('../examples/api/node_modules/.bin/prisma', import.meta.url),
   );
 
-  execFileSync(prismaBin, ['migrate', 'deploy'], {
-    cwd: apiDir,
-    env: { ...process.env, DATABASE_URL: TEST_DATABASE_URL },
-    stdio: 'inherit',
-  });
+  const binDir = fileURLToPath(new URL('../examples/api/node_modules/.bin', import.meta.url));
+
+  const run = (args: string[]): void => {
+    execFileSync(prismaBin, args, {
+      cwd: apiDir,
+      env: {
+        ...process.env,
+        DATABASE_URL: TEST_DATABASE_URL,
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+      },
+      stdio: 'inherit',
+    });
+  };
+
+  run(['migrate', 'deploy']);
+  run(['generate']);
 }

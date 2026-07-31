@@ -1,10 +1,11 @@
 import { Inject, Injectable, type Provider } from '@nestjs/common';
+import { AsyncLocalStorageContextStore } from '../context/index.js';
 import type { PolicyEntry, ViewOf } from '../policy/index.js';
-import type { ReadArgs } from '../read/index.js';
-import { PgbaseReadService } from './read-service.js';
-import type { Resolved } from './tokens.js';
-import { PGBASE_RESOLVED, delegateName } from './tokens.js';
-import type { PgbasePrismaClient } from './types.js';
+import { DEFAULT_READ_LIMITS } from '../read/index.js';
+import { PgbaseSchemaRegistry } from './schema-registry.js';
+import { createScopedClient } from './scoped-extension.js';
+import { PGBASE_OPTIONS } from './tokens.js';
+import type { PgbaseModuleOptions, PgbasePrismaClient } from './types.js';
 
 type FindManyDelegate = { findMany(args?: any): Promise<any> };
 
@@ -18,12 +19,24 @@ type ScopedModelKeys<Client, Registry> = {
     : never;
 }[Extract<keyof Client, string>];
 
+type ScopedOperation =
+  | 'findMany'
+  | 'findFirst'
+  | 'findFirstOrThrow'
+  | 'findUnique'
+  | 'findUniqueOrThrow'
+  | 'count'
+  | 'aggregate'
+  | 'groupBy'
+  | 'create'
+  | 'update'
+  | 'delete';
+
 export type ScopedPrisma<Client, Registry> = {
-  readonly [K in ScopedModelKeys<Client, Registry>]: {
-    findMany(
-      args?: Client[K] extends { findMany(args?: infer A): any } ? A : never,
-    ): Promise<ViewOf<Registry[Capitalize<K & string> & keyof Registry]>[]>;
-  };
+  readonly [K in ScopedModelKeys<Client, Registry>]: Pick<
+    Client[K],
+    Extract<ScopedOperation, keyof Client[K]>
+  >;
 };
 
 export type ScopedPrismaService<
@@ -49,32 +62,22 @@ export function ScopedPrismaToken<
 @Injectable()
 class ScopedPrismaFactory {
   constructor(
-    private readonly reads: PgbaseReadService,
-    @Inject(PGBASE_RESOLVED) private readonly resolved: Resolved,
+    @Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions,
+    private readonly resolved: PgbaseSchemaRegistry,
+    private readonly contextStore: AsyncLocalStorageContextStore,
   ) {}
 
+  /** One instance for the whole process — per-request clients would multiply connection pools. */
   create<
     Client extends PgbasePrismaClient,
     Registry extends Record<string, PolicyEntry<any, any, any>>,
   >(): ScopedPrismaService<Client, Registry> {
-    const modelByDelegate = new Map(
-      this.resolved.schema.models.map((m) => [delegateName(m.model), m.model] as const),
-    );
-
-    return new Proxy(
-      {},
-      {
-        get: (target, prop, receiver) => {
-          if (typeof prop === 'string' && prop in target) {
-            return Reflect.get(target, prop, receiver);
-          }
-          if (typeof prop !== 'string') return undefined;
-          const model = modelByDelegate.get(prop);
-          if (!model) return undefined;
-          return { findMany: (args: ReadArgs = {}) => this.reads.read(model, args) };
-        },
-      },
-    ) as unknown as ScopedPrismaService<Client, Registry>;
+    return createScopedClient({
+      base: this.options.prisma,
+      resolved: this.resolved,
+      contextStore: this.contextStore,
+      limits: this.options.limits ?? DEFAULT_READ_LIMITS,
+    }) as ScopedPrismaService<Client, Registry>;
   }
 }
 

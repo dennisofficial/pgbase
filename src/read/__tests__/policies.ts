@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { definePolicy } from '../../policy/define.js';
 import { NO_CLIENT_ACCESS, type PolicyEntry } from '../../policy/types.js';
 import { validatePolicies } from '../../policy/validate.js';
-import type { ReadContext } from '../scope.js';
+import type { ReadContext, ReadProfile } from '../scope.js';
 import { DEFAULT_READ_LIMITS, type ReadLimits } from '../types.js';
 import { resolveReadFixtureSchema } from './fixtures.js';
 
@@ -65,7 +65,6 @@ interface JobSettingsRow {
   readonly webhookSecret: string;
 }
 
-/** Omits `webhookSecret` — the policy a JobSettings model would actually ship with. */
 export const jobSettingsPolicyVisible = definePolicy<JobSettingsRow, Claims>('JobSettings')({
   omit: ['webhookSecret'],
   rls: () => ({}),
@@ -77,13 +76,11 @@ const BASE_REGISTRY = {
   Task: taskPolicy,
 } satisfies Record<string, PolicyEntry<any, any, any>>;
 
-/** JobSettings unreachable: the headline "nested include leaks a hidden model" scenario. */
 export const REGISTRY_HIDDEN_SETTINGS = {
   ...BASE_REGISTRY,
   JobSettings: NO_CLIENT_ACCESS,
 } satisfies Record<string, PolicyEntry<any, any, any>>;
 
-/** JobSettings reachable, but its policy still withholds `webhookSecret`. */
 export const REGISTRY_VISIBLE_SETTINGS = {
   ...BASE_REGISTRY,
   JobSettings: jobSettingsPolicyVisible,
@@ -94,8 +91,9 @@ export async function buildContext(
   registry: Record<string, PolicyEntry<any, any, any>>,
   claims: Claims = { orgId: ORG_1 },
   limits: ReadLimits = DEFAULT_READ_LIMITS,
+  profile: ReadProfile = 'client',
 ): Promise<ReadContext<Claims>> {
   const schema = await resolveReadFixtureSchema(pool);
   const policies = validatePolicies(schema, registry);
-  return { schema, policies, claims, limits };
+  return { schema, policies, claims, limits, profile };
 }

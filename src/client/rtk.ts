@@ -14,6 +14,31 @@ export type LiveQueryResult<T> =
   | { readonly data: readonly T[]; readonly meta: LiveQueryMeta<T>; readonly error?: undefined }
   | { readonly error: string; readonly data?: undefined; readonly meta?: undefined };
 
+/**
+ * For `configureStore({ middleware: (d) => d({ serializableCheck: { isSerializable } }) })`. Rows
+ * keep the Prisma types they were read with, so RTK's plain-JSON default rejects every cache entry
+ * a delta touches. Compose to admit custom `serializers`: `(v) => isLiveSerializable(v) || ...`.
+ */
+export function isLiveSerializable(value: unknown): boolean {
+  switch (typeof value) {
+    case 'undefined':
+    case 'string':
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+      return true;
+    case 'object':
+      break;
+    default:
+      return false;
+  }
+  if (value === null || Array.isArray(value) || value instanceof Date) return true;
+  if (ArrayBuffer.isView(value)) return true;
+  if (typeof (value as { toFixed?: unknown }).toFixed === 'function') return true;
+  const proto = Object.getPrototypeOf(value) as object | null;
+  return proto === null || proto === Object.prototype;
+}
+
 export function liveQueryEndpoint<T, Arg = void>(
   accessor: ModelAccessor<T>,
   toArgs: (arg: Arg) => LiveArgs = () => ({}),
