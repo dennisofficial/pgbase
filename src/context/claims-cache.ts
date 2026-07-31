@@ -1,3 +1,6 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { PGBASE_OPTIONS } from '../nest/tokens.js';
+import type { PgbaseModuleOptions } from '../nest/types.js';
 import type { ClaimsBuilder, ClaimsCache, ClaimsCacheStats } from './types.js';
 
 interface CacheEntry<Claims> {
@@ -20,6 +23,7 @@ export interface MemoryClaimsCacheOptions {
 
 const DEFAULT_MAX_SIZE = 10_000;
 
+@Injectable()
 export class MemoryClaimsCache<Principal = unknown, Claims = unknown> implements ClaimsCache<
   Principal,
   Claims
@@ -28,12 +32,14 @@ export class MemoryClaimsCache<Principal = unknown, Claims = unknown> implements
   private readonly inflight = new Map<string, InflightEntry<Claims>>();
   private readonly maxSize: number;
   private readonly counters = { hits: 0, misses: 0, coalesced: 0 };
+  private readonly builder: ClaimsBuilder<Principal, Claims>;
 
   constructor(
-    private readonly builder: ClaimsBuilder<Principal, Claims>,
-    options: MemoryClaimsCacheOptions = {},
+    @Inject(PGBASE_OPTIONS)
+    options: PgbaseModuleOptions<Principal, Claims>,
   ) {
-    this.maxSize = options.maxSize ?? DEFAULT_MAX_SIZE;
+    this.builder = options.claimsBuilder;
+    this.maxSize = options.claimsCacheOptions?.maxSize ?? DEFAULT_MAX_SIZE;
   }
 
   get stats(): ClaimsCacheStats {

@@ -7,7 +7,9 @@ try {
 } catch {}
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    forceCloseConnections: true,
+  });
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
     allowedHeaders: ['content-type', 'x-pgbase-dev-user'],

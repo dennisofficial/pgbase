@@ -10,7 +10,7 @@
     "db:generate": "prisma generate",
     "db:reset": "prisma migrate reset",
     "db:seed": "nest build && node dist/prisma/seed.js",
-    "smoke": "nest build && node dist/src/live-smoke.js"
+    "test:e2e": "vitest run"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",
@@ -26,10 +26,14 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.24",
+    "@nestjs/testing": "^11.1.28",
+    "@swc/core": "^1.15.47",
     "@types/node": "^25.6.0",
     "@types/pg": "^8.11.10",
     "prisma": "7.9.1",
     "socket.io-client": "^4.8.1",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "unplugin-swc": "^1.5.9",
+    "vitest": "^3.2.7"
   }
 }
