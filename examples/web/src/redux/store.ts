@@ -1,11 +1,16 @@
+import { isLiveSerializable } from '@dltech/pgbase/client';
 import { configureStore } from '@reduxjs/toolkit';
-import { listReducer } from './list/list-slice';
+import { liveApi } from './live-api';
 
 export const makeStore = () => {
   return configureStore({
     reducer: {
-      list: listReducer,
+      [liveApi.reducerPath]: liveApi.reducer,
     },
+    middleware: (getDefault) =>
+      getDefault({ serializableCheck: { isSerializable: isLiveSerializable } }).concat(
+        liveApi.middleware,
+      ),
   });
 };
 

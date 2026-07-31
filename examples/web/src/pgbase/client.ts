@@ -1,71 +1,127 @@
-import { createClient, type LiveSocket } from '@dltech/pgbase/client';
+import { createClient, type GetAuth } from '@dltech/pgbase/client';
+import { useSyncExternalStore } from 'react';
 import { io } from 'socket.io-client';
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
-export const DEV_USERS = {
-  alice: '00000000-0000-4000-8000-0000000000a1',
-  carol: '00000000-0000-4000-8000-0000000000b1',
-} as const;
-
-// Matches ORG_A / ORG_B in examples/api/prisma/seed.ts — alice is the only member of org A,
-// carol the only member of org B.
-export const DEV_ORGS = {
-  alice: '00000000-0000-4000-8000-00000000000a',
-  carol: '00000000-0000-4000-8000-00000000000b',
-} as const;
-
-export type DevUser = keyof typeof DEV_USERS;
+export type JobStatus = 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED';
 
 export interface Job {
   readonly id: string;
-  readonly name: string;
-  readonly status: string;
-  readonly priority: number;
   readonly orgId: string;
+  readonly name: string;
+  readonly status: JobStatus;
+  readonly priority: number;
+  readonly labels: readonly string[];
+  readonly metadata: unknown;
+  readonly closedAt: Date | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
-// The one model in the schema with an omit list covering every column but its primary key (see
-// pgbasePolicies.AuditLog in the API) — `id` is the only field that ever arrives. Its Postgres
-// type is int8, which superjson decodes to a real JS `bigint`, not a number or string.
+export interface Task {
+  readonly id: string;
+  readonly orgId: string;
+  readonly jobId: string;
+  readonly title: string;
+  readonly done: boolean;
+  readonly blockedBy: unknown;
+  readonly createdAt: Date;
+}
+
+/** `actorId` is absent, not blank — the policy omits it server-side, so it never reaches the wire. */
 export interface AuditLog {
   readonly id: bigint;
+  readonly action: string;
+  readonly at: Date;
+}
+
+export interface Invoice {
+  readonly id: string;
+  readonly orgId: string;
+  /** Decimal(18,4). Arrives as a string: 18 digits of precision do not survive a JS number. */
+  readonly amount: string;
+  readonly externalRef: bigint;
+  readonly issuedAt: Date;
+}
+
+export interface Org {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
 }
 
 interface Models {
   readonly Job: Job;
+  readonly Task: Task;
   readonly AuditLog: AuditLog;
+  readonly Invoice: Invoice;
+  readonly Org: Org;
 }
 
-// Captured so the reconnect-scenario page can drive real disconnect/reconnect cycles at will,
-// instead of racing `$setAuth`'s own disconnect+reconnect. Nothing else in this app should reach
-// for this — every other page talks to `pgbase` only.
-let liveSocket: LiveSocket | null = null;
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity
+// ─────────────────────────────────────────────────────────────────────────────
+// Stands in for a login. Alice and Bob share an org, so two windows signed in as the two of them
+// are a real collaborative session; Carol is in a different org and proves the isolation.
 
-// One instance for the whole app, imported wherever it's needed — creating it doesn't open a
-// socket; the client connects lazily on the first live query or read.
+export const DEV_USERS = {
+  alice: {
+    id: '00000000-0000-4000-8000-0000000000a1',
+    name: 'Alice Chen',
+    org: 'Northwind Robotics',
+  },
+  bob: { id: '00000000-0000-4000-8000-0000000000a2', name: 'Bob Osei', org: 'Northwind Robotics' },
+  carol: { id: '00000000-0000-4000-8000-0000000000b1', name: 'Carol Vega', org: 'Acme Freight' },
+} as const;
+
+export type DevUser = keyof typeof DEV_USERS;
+
+const SESSION_KEY = 'pgbase-example-user';
+
+let currentUser: DevUser = 'alice';
+const userListeners = new Set<() => void>();
+
+export function getCurrentUser(): DevUser {
+  return currentUser;
+}
+
+export function getAuthHeaders(): Record<string, string> {
+  return { 'x-pgbase-dev-user': DEV_USERS[currentUser].id };
+}
+
+const getAuth: GetAuth = () => getAuthHeaders();
+
+// Creating the client opens nothing; the socket connects lazily on the first live query.
 export const pgbase = createClient<Models>({
   baseUrl: API_URL,
-  getAuth: () => ({ 'x-pgbase-dev-user': DEV_USERS.alice }),
-  createSocket: (baseUrl, opts) => {
-    const socket = io(baseUrl, opts);
-    liveSocket = socket as unknown as LiveSocket;
-    return liveSocket;
-  },
+  getAuth,
+  createSocket: (baseUrl, opts) => io(baseUrl, opts),
 });
 
-// A real app reads the caller off a session, not a dropdown — this is dev-only stand-in for a
-// login that changes identity. `$setAuth` reconnects the socket under the new claims rather than
-// the caller having to throw away and rebuild the client to switch users.
-export function setDevUser(user: DevUser): void {
-  pgbase.$setAuth({ 'x-pgbase-dev-user': DEV_USERS[user] });
+export function setCurrentUser(next: DevUser): void {
+  if (next === currentUser) return;
+  currentUser = next;
+  window.sessionStorage.setItem(SESSION_KEY, next);
+  // Same getter, but re-setting it reconnects the socket, so every open subscription resyncs under
+  // the new claims instead of keeping rows the previous identity was allowed to see.
+  pgbase.$setAuth(getAuth);
+  for (const listener of userListeners) listener();
 }
 
-/** Manual, held-open disconnect — unlike `$setAuth`, this does not immediately reconnect. Demo-only. */
-export function forceDisconnect(): void {
-  (liveSocket as unknown as { disconnect(): void } | null)?.disconnect();
+/** Per-tab, so two windows can hold two identities across reloads. Called once, after mount. */
+export function restoreCurrentUser(): void {
+  const stored = window.sessionStorage.getItem(SESSION_KEY);
+  if (stored !== null && stored in DEV_USERS) setCurrentUser(stored as DevUser);
 }
 
-export function forceReconnect(): void {
-  (liveSocket as unknown as { connect(): void } | null)?.connect();
+export function useCurrentUser(): DevUser {
+  return useSyncExternalStore(
+    (listener) => {
+      userListeners.add(listener);
+      return () => userListeners.delete(listener);
+    },
+    getCurrentUser,
+    () => 'alice' as DevUser,
+  );
 }
