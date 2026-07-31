@@ -6,7 +6,7 @@ import {
   type InsertMessage,
   type RawTuple,
   type UpdateMessage,
-} from './pgoutput.js';
+} from './pgoutput-messages.js';
 import { WalDecodeError, type ColumnRow } from './types.js';
 
 export function parsePgArrayLiteral(text: string, relation: string | null): (string | null)[] {
@@ -70,8 +70,6 @@ function decodeScalar(typeOid: number, raw: string, relation: string | null): un
     case OID.FLOAT4:
     case OID.FLOAT8:
       return Number(raw);
-    // compare.ts's int8 comparator operates on `bigint`; numeric stays text (its comparator does
-    // exact decimal-string arithmetic — see `compareNumeric` — precisely to avoid float coercion).
     case OID.INT8:
       return BigInt(raw);
     case OID.NUMERIC:
@@ -89,8 +87,6 @@ function decodeScalar(typeOid: number, raw: string, relation: string | null): un
     case OID.JSON:
     case OID.JSONB: {
       const parsed: unknown = JSON.parse(raw);
-      // A JSON `null` scalar arrived as *present* text ("null"), not as the wire's 'n' (SQL
-      // NULL) kind — that distinction is exactly what `JSON_NULL` exists to carry.
       return parsed === null ? JSON_NULL : parsed;
     }
     default:
@@ -98,7 +94,6 @@ function decodeScalar(typeOid: number, raw: string, relation: string | null): un
   }
 }
 
-/** Decodes one column's raw WAL text into the exact runtime representation `compare.ts` expects. */
 export function decodeColumn(
   field: ResolvedField,
   raw: string,
@@ -133,8 +128,6 @@ function decodeFullTuple(
   for (const field of model.fields) {
     const v = raw[field.column];
     if (v === undefined) {
-      // Not on the wire at all: a restricted publication column list (rejected at boot) or a
-      // column dropped by DDL mid-stream. Never fabricate a value for it.
       unknown.add(field.column);
       continue;
     }
@@ -152,8 +145,6 @@ function decodeFullTuple(
   return row;
 }
 
-/** Key submessage ('K'): only the identity columns are on the wire. Never touches
- * `unknownColumns` — the other columns are deliberately absent by protocol design, not unknown. */
 function decodeKeyOnlyRow(model: ResolvedModel, rawKey: RawTuple): ColumnRow {
   const row: ColumnRow = {};
   for (const [column, v] of Object.entries(rawKey)) {
@@ -164,8 +155,6 @@ function decodeKeyOnlyRow(model: ResolvedModel, rawKey: RawTuple): ColumnRow {
   return row;
 }
 
-/** No old-tuple info was sent at all (default/index identity, no identity column changed). The
- * identity is unchanged by definition, so it can be read straight off the decoded new row. */
 function synthesizeKeyRow(model: ResolvedModel, newRow: ColumnRow): ColumnRow {
   const row: ColumnRow = {};
   for (const column of model.primaryKey) {

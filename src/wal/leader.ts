@@ -2,14 +2,14 @@ import type { Client, ClientConfig, Pool } from 'pg';
 import { LogicalReplicationService } from 'pg-logical-replication';
 import type { ResolvedSchema } from '../schema/types.js';
 import { decodeDelete, decodeInsert, decodeUpdate } from './decode.js';
-import {
-  PgoutputDecoder,
-  type DeleteMessage,
-  type InsertMessage,
-  type PgoutputMessage,
-  type RelationMessage,
-  type UpdateMessage,
-} from './pgoutput.js';
+import type {
+  DeleteMessage,
+  InsertMessage,
+  PgoutputMessage,
+  RelationMessage,
+  UpdateMessage,
+} from './pgoutput-messages.js';
+import { PgoutputDecoder } from './pgoutput.js';
 import {
   WalConfigurationError,
   WalDecodeError,

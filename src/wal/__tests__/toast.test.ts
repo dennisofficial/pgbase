@@ -4,12 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestPool } from '../../schema/test-support.js';
 import type { ResolvedModel } from '../../schema/types.js';
 import { createWalLeader } from '../leader.js';
-import {
-  PgoutputDecoder,
-  TOAST_UNCHANGED,
-  type PgoutputMessage,
-  type UpdateMessage,
-} from '../pgoutput.js';
+import { TOAST_UNCHANGED, type PgoutputMessage, type UpdateMessage } from '../pgoutput-messages.js';
+import { PgoutputDecoder } from '../pgoutput.js';
 import type { ChangeEvent, WalLeader } from '../types.js';
 import { resolveSimpleModel, schemaOf } from './simple-model.js';
 import {

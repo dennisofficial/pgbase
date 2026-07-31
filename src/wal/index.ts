@@ -8,7 +8,7 @@ export {
 export type { DecodedChange } from './decode.js';
 export { createWalLeader } from './leader.js';
 export type { WalLeaderDependencies } from './leader.js';
-export { PgoutputDecoder, TOAST_UNCHANGED } from './pgoutput.js';
+export { TOAST_UNCHANGED } from './pgoutput-messages.js';
 export type {
   BeginMessage,
   CommitMessage,
@@ -20,5 +20,6 @@ export type {
   RelationMessage,
   TruncateMessage,
   UpdateMessage,
-} from './pgoutput.js';
+} from './pgoutput-messages.js';
+export { PgoutputDecoder } from './pgoutput.js';
 export * from './types.js';

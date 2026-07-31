@@ -1,180 +1,22 @@
+import { BinaryReader, textDecoder } from './binary-reader.js';
+import {
+  TOAST_UNCHANGED,
+  type BeginMessage,
+  type CommitMessage,
+  type DeleteMessage,
+  type InsertMessage,
+  type OriginMessage,
+  type PgoutputMessage,
+  type RawTuple,
+  type RelationColumn,
+  type RelationMessage,
+  type ReplicaIdentityWire,
+  type StreamMessage,
+  type TruncateMessage,
+  type TypeMessage,
+  type UpdateMessage,
+} from './pgoutput-messages.js';
 import { WalDecodeError } from './types.js';
-
-export const TOAST_UNCHANGED: unique symbol = Symbol('pgbase.wal.toastUnchanged');
-
-export type RawValue = string | null | typeof TOAST_UNCHANGED;
-export type RawTuple = Record<string, RawValue>;
-
-export type ReplicaIdentityWire = 'default' | 'nothing' | 'full' | 'index';
-
-export interface RelationColumn {
-  readonly name: string;
-  readonly typeOid: number;
-  readonly isKey: boolean;
-}
-
-export interface RelationMessage {
-  readonly tag: 'relation';
-  readonly relationOid: number;
-  readonly schema: string;
-  readonly name: string;
-  readonly replicaIdentity: ReplicaIdentityWire;
-  readonly columns: readonly RelationColumn[];
-}
-
-export interface BeginMessage {
-  readonly tag: 'begin';
-  readonly commitLsn: string;
-  readonly commitTime: bigint;
-  readonly xid: number;
-}
-
-export interface CommitMessage {
-  readonly tag: 'commit';
-  readonly commitLsn: string;
-  readonly commitEndLsn: string;
-  readonly commitTime: bigint;
-}
-
-export interface OriginMessage {
-  readonly tag: 'origin';
-  readonly originLsn: string | null;
-  readonly originName: string;
-}
-
-export interface TypeMessage {
-  readonly tag: 'type';
-  readonly typeOid: number;
-  readonly typeSchema: string;
-  readonly typeName: string;
-}
-
-export interface InsertMessage {
-  readonly tag: 'insert';
-  readonly relationOid: number;
-  readonly new: RawTuple;
-}
-
-export interface UpdateMessage {
-  readonly tag: 'update';
-  readonly relationOid: number;
-  /** Present only under default/index identity when a key column changed. Key columns only. */
-  readonly key: RawTuple | null;
-  /** Present only under FULL identity. Every published column. */
-  readonly old: RawTuple | null;
-  readonly new: RawTuple;
-}
-
-export interface DeleteMessage {
-  readonly tag: 'delete';
-  readonly relationOid: number;
-  readonly key: RawTuple | null;
-  readonly old: RawTuple | null;
-}
-
-export interface TruncateMessage {
-  readonly tag: 'truncate';
-  readonly cascade: boolean;
-  readonly restartIdentity: boolean;
-  readonly relationOids: readonly number[];
-}
-
-export interface StreamMessage {
-  readonly tag: 'stream';
-  readonly kind: 'start' | 'stop' | 'commit' | 'abort';
-}
-
-export interface MessageMessage {
-  readonly tag: 'message';
-}
-
-export type PgoutputMessage =
-  | BeginMessage
-  | CommitMessage
-  | OriginMessage
-  | TypeMessage
-  | RelationMessage
-  | InsertMessage
-  | UpdateMessage
-  | DeleteMessage
-  | TruncateMessage
-  | StreamMessage
-  | MessageMessage;
-
-const textDecoder = new TextDecoder();
-
-class BinaryReader {
-  private pos = 0;
-
-  constructor(private readonly buf: Buffer) {}
-
-  private need(n: number): void {
-    if (this.buf.length < this.pos + n) {
-      throw new WalDecodeError(null, 'pgoutput message ended before an expected field.');
-    }
-  }
-
-  readUint8(): number {
-    this.need(1);
-    return this.buf[this.pos++]!;
-  }
-
-  readInt16(): number {
-    this.need(2);
-    const v = (this.buf[this.pos]! << 8) | this.buf[this.pos + 1]!;
-    this.pos += 2;
-    return v;
-  }
-
-  readInt32(): number {
-    this.need(4);
-    const v = this.buf.readInt32BE(this.pos);
-    this.pos += 4;
-    return v;
-  }
-
-  readUint32(): number {
-    this.need(4);
-    const v = this.buf.readUInt32BE(this.pos);
-    this.pos += 4;
-    return v;
-  }
-
-  readUint64(): bigint {
-    this.need(8);
-    const v = this.buf.readBigUInt64BE(this.pos);
-    this.pos += 8;
-    return v;
-  }
-
-  readBytes(n: number): Buffer {
-    this.need(n);
-    const v = this.buf.subarray(this.pos, this.pos + n);
-    this.pos += n;
-    return v;
-  }
-
-  readString(): string {
-    const end = this.buf.indexOf(0x00, this.pos);
-    if (end < 0) throw new WalDecodeError(null, 'pgoutput message: unterminated string field.');
-    const v = textDecoder.decode(this.buf.subarray(this.pos, end));
-    this.pos = end + 1;
-    return v;
-  }
-
-  /** LSN wire format: two uint32s, rendered as Postgres's canonical "HEX/HEX" text form. */
-  readLsn(): string {
-    const hi = this.readUint32();
-    const lo = this.readUint32();
-    return `${hi.toString(16).toUpperCase()}/${lo.toString(16).toUpperCase()}`;
-  }
-
-  /** Microseconds since the Postgres epoch (2000-01-01), converted to microseconds since the
-   * Unix epoch — the same bigint representation `parseTimestampMicros` produces. */
-  readTime(): bigint {
-    return this.readUint64() + 946_684_800_000_000n;
-  }
-}
 
 function decodeReplicaIdentity(byte: number): ReplicaIdentityWire {
   switch (byte) {
@@ -233,6 +75,10 @@ export class PgoutputDecoder {
     }
   }
 
+  relationFor(oid: number): RelationMessage | undefined {
+    return this.relations.get(oid);
+  }
+
   private parseBegin(reader: BinaryReader): BeginMessage {
     return {
       tag: 'begin',
@@ -288,6 +134,51 @@ export class PgoutputDecoder {
     return message;
   }
 
+  private parseInsert(reader: BinaryReader): InsertMessage {
+    const relation = this.requireRelation(reader.readUint32());
+    reader.readUint8(); // 'N' tuple marker
+    return {
+      tag: 'insert',
+      relationOid: relation.relationOid,
+      new: this.readTuple(reader, relation),
+    };
+  }
+
+  private parseUpdate(reader: BinaryReader): UpdateMessage {
+    const relation = this.requireRelation(reader.readUint32());
+    const sub = reader.readUint8();
+    let prior: PriorTuple = { key: null, old: null };
+    if (sub !== 0x4e /* N */) {
+      prior = this.readPriorTuple(reader, relation, sub, 'Update');
+      reader.readUint8(); // 'N'
+    }
+    return {
+      tag: 'update',
+      relationOid: relation.relationOid,
+      ...prior,
+      new: this.readTuple(reader, relation),
+    };
+  }
+
+  private parseDelete(reader: BinaryReader): DeleteMessage {
+    const relation = this.requireRelation(reader.readUint32());
+    const prior = this.readPriorTuple(reader, relation, reader.readUint8(), 'Delete');
+    return { tag: 'delete', relationOid: relation.relationOid, ...prior };
+  }
+
+  private parseTruncate(reader: BinaryReader): TruncateMessage {
+    const count = reader.readInt32();
+    const flags = reader.readUint8();
+    const relationOids: number[] = [];
+    for (let i = 0; i < count; i++) relationOids.push(reader.readUint32());
+    return {
+      tag: 'truncate',
+      cascade: (flags & 0b1) !== 0,
+      restartIdentity: (flags & 0b10) !== 0,
+      relationOids,
+    };
+  }
+
   private requireRelation(oid: number): RelationMessage {
     const relation = this.relations.get(oid);
     if (!relation) {
@@ -297,6 +188,20 @@ export class PgoutputDecoder {
       );
     }
     return relation;
+  }
+
+  private readPriorTuple(
+    reader: BinaryReader,
+    relation: RelationMessage,
+    sub: number,
+    context: 'Update' | 'Delete',
+  ): PriorTuple {
+    if (sub === 0x4b /* K */) return { key: this.readKeyTuple(reader, relation), old: null };
+    if (sub === 0x4f /* O */) return { key: null, old: this.readTuple(reader, relation) };
+    throw new WalDecodeError(
+      relation.name,
+      `${context} message: unknown submessage kind 0x${sub.toString(16)}.`,
+    );
   }
 
   private readTuple(reader: BinaryReader, relation: RelationMessage): RawTuple {
@@ -341,74 +246,9 @@ export class PgoutputDecoder {
     }
     return key;
   }
+}
 
-  private parseInsert(reader: BinaryReader): InsertMessage {
-    const relation = this.requireRelation(reader.readUint32());
-    reader.readUint8(); // 'N' tuple marker
-    return {
-      tag: 'insert',
-      relationOid: relation.relationOid,
-      new: this.readTuple(reader, relation),
-    };
-  }
-
-  private parseUpdate(reader: BinaryReader): UpdateMessage {
-    const relation = this.requireRelation(reader.readUint32());
-    const sub = reader.readUint8();
-    let key: RawTuple | null = null;
-    let old: RawTuple | null = null;
-    let newTuple: RawTuple;
-    if (sub === 0x4b /* K */) {
-      key = this.readKeyTuple(reader, relation);
-      reader.readUint8(); // 'N'
-      newTuple = this.readTuple(reader, relation);
-    } else if (sub === 0x4f /* O */) {
-      old = this.readTuple(reader, relation);
-      reader.readUint8(); // 'N'
-      newTuple = this.readTuple(reader, relation);
-    } else if (sub === 0x4e /* N */) {
-      newTuple = this.readTuple(reader, relation);
-    } else {
-      throw new WalDecodeError(
-        relation.name,
-        `Update message: unknown submessage kind 0x${sub.toString(16)}.`,
-      );
-    }
-    return { tag: 'update', relationOid: relation.relationOid, key, old, new: newTuple };
-  }
-
-  private parseDelete(reader: BinaryReader): DeleteMessage {
-    const relation = this.requireRelation(reader.readUint32());
-    const sub = reader.readUint8();
-    let key: RawTuple | null = null;
-    let old: RawTuple | null = null;
-    if (sub === 0x4b /* K */) {
-      key = this.readKeyTuple(reader, relation);
-    } else if (sub === 0x4f /* O */) {
-      old = this.readTuple(reader, relation);
-    } else {
-      throw new WalDecodeError(
-        relation.name,
-        `Delete message: unknown submessage kind 0x${sub.toString(16)}.`,
-      );
-    }
-    return { tag: 'delete', relationOid: relation.relationOid, key, old };
-  }
-
-  private parseTruncate(reader: BinaryReader): TruncateMessage {
-    const count = reader.readInt32();
-    const flags = reader.readUint8();
-    const relationOids: number[] = [];
-    for (let i = 0; i < count; i++) relationOids.push(reader.readUint32());
-    return {
-      tag: 'truncate',
-      cascade: (flags & 0b1) !== 0,
-      restartIdentity: (flags & 0b10) !== 0,
-      relationOids,
-    };
-  }
-
-  relationFor(oid: number): RelationMessage | undefined {
-    return this.relations.get(oid);
-  }
+interface PriorTuple {
+  readonly key: RawTuple | null;
+  readonly old: RawTuple | null;
 }
