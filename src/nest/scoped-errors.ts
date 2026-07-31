@@ -1,7 +1,3 @@
-/**
- * Raised when a scoped write's pre-image check finds nothing. Deliberately does not distinguish
- * "no such row" from "someone else's row" — telling the two apart is itself a disclosure.
- */
 export class ScopedRowNotFoundError extends Error {
   constructor(readonly model: string) {
     super(
