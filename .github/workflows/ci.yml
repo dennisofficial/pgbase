@@ -19,12 +19,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version-file: '.nvmrc'
+
+      # pnpm's version comes from the `packageManager` field in package.json, so CI can
+      # never drift from local dev. Corepack ships with Node 24; from Node 25 it is
+      # unbundled and this step needs `npm i -g corepack` in front of it.
+      - name: Enable corepack
+        run: corepack enable
+
+      # setup-node's built-in `cache: pnpm` can't be used here — it probes for pnpm before
+      # corepack has installed the shims, so it fails to find a package manager. Caching
+      # the store directly is equivalent.
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
 
       # `prepare` runs tsup, so dist/ and the .d.ts/.d.mts trees are built here.
       - run: pnpm install --frozen-lockfile

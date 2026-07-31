@@ -26,13 +26,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
+          node-version-file: '.nvmrc'
           registry-url: 'https://registry.npmjs.org'
+
+      # pnpm's version comes from the `packageManager` field in package.json, so the
+      # publish runs on exactly the pnpm that produced the lockfile. Corepack ships with
+      # Node 24; from Node 25 it is unbundled and needs `npm i -g corepack` in front.
+      - name: Enable corepack
+        run: corepack enable
+
+      # setup-node's built-in `cache: pnpm` can't be used here — it probes for pnpm before
+      # corepack has installed the shims. Caching the store directly is equivalent.
+      - name: Resolve pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
 
       - name: Read version
         id: v
