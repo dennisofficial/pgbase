@@ -3,9 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { scopedWhere } from '../../context/scoped-write.js';
 import { definePolicy } from '../../policy/define.js';
 import { computeFilterable } from '../../policy/filterable.js';
-import { buildProjector } from '../../policy/project.js';
 import type { Policy } from '../../policy/types.js';
-import { referencedColumns } from '../../query/columns.js';
 import { compileSql } from '../../query/compile-sql.js';
 import { normalize } from '../../query/normalize.js';
 import { createTestPool } from '../../schema/test-support.js';
@@ -23,6 +21,7 @@ import type { WalLeader } from '../../wal/types.js';
 import { InMemorySubscriptionRegistry } from '../registry.js';
 import { DefaultChangeRouter } from '../router.js';
 import { InMemoryChangeSink } from '../sink.js';
+import { buildLiveProjector, createSubscription } from '../subscription.js';
 import type { Delta, Subscription } from '../types.js';
 
 const TABLE = 'pgbase_live_widgets';
@@ -136,14 +135,7 @@ function buildSubscription(
   claims: Claims,
   clientWhere: Record<string, unknown>,
 ): Subscription {
-  const predicate = predicateFor(claims, clientWhere);
-  return {
-    id,
-    model: model.model,
-    predicate,
-    predicateColumns: referencedColumns(predicate),
-    project: buildProjector(model, widgetPolicy),
-  };
+  return createSubscription({ id, model, policy: widgetPolicy, claims, where: clientWhere });
 }
 
 function wireStore(subscription: Subscription): ClientStore & { dispose(): void } {
@@ -158,11 +150,11 @@ function wireStore(subscription: Subscription): ClientStore & { dispose(): void 
   });
 }
 
-/** What Tier 1 (RLS + client filter, same predicate) returns right now, projected the same way. */
-async function tier1Snapshot(claims: Claims, clientWhere: Record<string, unknown>) {
+/** What a read (RLS + client filter, same predicate) returns right now, projected the same way. */
+async function readSnapshot(claims: Claims, clientWhere: Record<string, unknown>) {
   const { text, values } = compileSql(predicateFor(claims, clientWhere));
   const { rows } = await pool.query(`SELECT * FROM "${TABLE}" WHERE ${text}`, [...values]);
-  const project = buildProjector(model, widgetPolicy);
+  const project = buildLiveProjector(model, widgetPolicy);
   const out = new Map<number, unknown>();
   for (const row of rows) {
     const view = project(row) as { id: number };
@@ -177,7 +169,7 @@ async function waitForLsn(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-describe('convergence: applying deltas equals a Tier 1 findMany with the same predicate', () => {
+describe('convergence: applying deltas equals a read with the same predicate', () => {
   for (const identity of ['DEFAULT', 'FULL'] as const) {
     it(`holds under REPLICA IDENTITY ${identity}`, async () => {
       await pool.query(`ALTER TABLE "${TABLE}" REPLICA IDENTITY ${identity}`);
@@ -224,7 +216,7 @@ describe('convergence: applying deltas equals a Tier 1 findMany with the same pr
 
         expect(store.resyncs).toEqual([]);
 
-        const expected = await tier1Snapshot(claims, { status: 'ACTIVE' });
+        const expected = await readSnapshot(claims, { status: 'ACTIVE' });
         expect(store.state).toEqual(expected);
         expect([...store.state.keys()].sort()).toEqual([base + 1, base + 2]);
       } finally {

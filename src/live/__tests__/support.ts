@@ -1,10 +1,11 @@
-import { buildProjector } from '../../policy/project.js';
 import type { Policy } from '../../policy/types.js';
 import type { LiveWhere, PredicateNode } from '../../query/ast.js';
 import { referencedColumns } from '../../query/columns.js';
 import { OID } from '../../query/compare.js';
 import { normalize } from '../../query/normalize.js';
 import type { ResolvedField, ResolvedModel } from '../../schema/types.js';
+import type { ColumnRow } from '../../wal/types.js';
+import { buildIdentifier, buildLiveProjector } from '../subscription.js';
 import type { Subscription } from '../types.js';
 
 function field(name: string, overrides: Partial<ResolvedField> = {}): ResolvedField {
@@ -58,12 +59,13 @@ export const widgetPolicy: Policy<any, any, any> = {
   rls: () => ({}),
 };
 
-const projectWidget = buildProjector(WIDGET_MODEL, widgetPolicy);
+const projectWidget = buildLiveProjector(WIDGET_MODEL, widgetPolicy);
+const identifyWidget = buildIdentifier(WIDGET_MODEL);
 
 export function widgetSubscription(
   id: string,
   where: LiveWhere,
-  project: (row: unknown) => unknown = projectWidget,
+  project: (row: ColumnRow) => unknown = projectWidget,
 ): Subscription {
   const predicate = widgetPredicate(where);
   return {
@@ -72,5 +74,6 @@ export function widgetSubscription(
     predicate,
     predicateColumns: referencedColumns(predicate),
     project,
+    identify: identifyWidget,
   };
 }

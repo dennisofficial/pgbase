@@ -85,7 +85,7 @@ describe('column-keyed WAL rows through a @map`ped model', () => {
     expect(buildIdentifier(MODEL)({ job_id: 7 })).toEqual({ jobId: 7 });
   });
 
-  it("Tier 1's projector cannot read a WAL row — which is why the live path needs its own", () => {
+  it("the read path's projector cannot read a WAL row — which is why live needs its own", () => {
     // Guards the reason buildLiveProjector exists. buildProjector reads `field.name`, so against a
     // column-keyed row every lookup misses and the view comes back empty. Using it on the live
     // path would silently deliver {} for every row on any @map'ped model.

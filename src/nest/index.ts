@@ -13,6 +13,7 @@ import { createWireCodec } from '../read/index.js';
 import { PgCatalogSchemaProvider } from '../schema/index.js';
 import { PgbaseContextMiddleware } from './context-middleware.js';
 import { PgbaseExceptionFilter } from './exception-filter.js';
+import { PgbaseLiveGateway } from './live-gateway.js';
 import { createPgbaseReadController } from './read-controller.js';
 import { PgbaseReadService } from './read-service.js';
 import { ScopedPrismaFactory, createScopedPrismaProvider } from './scoped-prisma.js';
@@ -28,10 +29,14 @@ import type { PgbaseModuleAsyncOptions, PgbaseModuleOptions, PgbasePrismaClient 
 
 export { PgbaseContextMiddleware } from './context-middleware.js';
 export { PgbaseExceptionFilter } from './exception-filter.js';
+export { PgbaseLiveGateway } from './live-gateway.js';
+export { PgbaseLiveRuntime } from './live-runtime.js';
+export type { LiveWalOptions, PgbaseLiveRuntimeOptions } from './live-runtime.js';
 export { PgbaseReadService } from './read-service.js';
 export { ScopedPrismaToken } from './scoped-prisma.js';
 export type { ScopedPrisma, ScopedPrismaService, ScopedPrismaTokenClass } from './scoped-prisma.js';
 export type {
+  PgbaseLiveOptions,
   PgbaseModuleAsyncOptions,
   PgbaseModuleOptions,
   PgbasePrismaClient,
@@ -110,6 +115,7 @@ export class PgbaseModule implements NestModule {
         },
         PgbaseContextMiddleware,
         PgbaseReadService,
+        PgbaseLiveGateway,
         ...scoped,
         { provide: APP_FILTER, useClass: PgbaseExceptionFilter },
       ],

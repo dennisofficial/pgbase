@@ -206,8 +206,6 @@ describe('PgCatalogSchemaProvider — physical resolution', () => {
     const auditLog = resolved.byModel.get('AuditLog')!;
     expect(auditLog.primaryKey).toEqual(['id']);
     expect(auditLog.byColumn.get('id')?.typeOid).toBe(OID_INT8);
-    // Default replica identity (PK-only) — the fixture leaves this table off REPLICA IDENTITY
-    // FULL on purpose, to prove the degraded Tier B path resolves cleanly.
     expect(auditLog.replicaIdentity).toBe('default');
   });
 

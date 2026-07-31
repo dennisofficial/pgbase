@@ -1,12 +1,17 @@
 import type { FactoryProvider, ModuleMetadata } from '@nestjs/common';
 import type { Pool } from 'pg';
+import type { ServerOptions } from 'socket.io';
 import type { ClaimsBuilder, MemoryClaimsCacheOptions } from '../context/index.js';
 import type { PolicyEntry } from '../policy/index.js';
 import type { ArgsTreeLimits, ReadLimits, WireCustomType } from '../read/index.js';
 import type { StaticSchema } from '../schema/index.js';
+import type { LiveWalOptions } from './live-runtime.js';
 import type { ScopedPrismaTokenClass } from './scoped-prisma.js';
 
-/** Minimal shape pgbase needs from a generated Prisma client — never the full generated type. */
+export interface PgbaseLiveOptions extends LiveWalOptions {
+  readonly socketIoOptions?: Partial<ServerOptions>;
+}
+
 export interface PgbasePrismaClient {
   $transaction<T>(fn: (tx: PgbasePrismaClient) => Promise<T>): Promise<T>;
   $executeRawUnsafe(query: string, ...values: unknown[]): Promise<unknown>;
@@ -36,6 +41,7 @@ export interface PgbaseModuleOptions<
   readonly scopedPrisma?: ScopedPrismaTokenClass<Client, Registry>;
   readonly routePrefix?: string;
   readonly getPrincipal: (req: unknown) => Principal;
+  readonly live?: PgbaseLiveOptions;
 }
 
 export type PgbaseRuntimeOptions<

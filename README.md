@@ -21,18 +21,23 @@ mutations only                              reads only, live by default
 
 The backend writes **no read endpoints**.
 
-## Capability tiers
+## Reads and live queries
 
-Cost regimes differ by orders of magnitude between a one-shot read and a live subscription, so
-they don't get the same capability budget.
+A **read** asks Postgres a question and gets an answer. A **live query** never gets to ask: it sees
+one changed row at a time, straight off the write-ahead log, and has to decide on its own whether
+that row still belongs in your result.
 
-| Tier | Transport               | Capability                                                                              | Declaration         |
-| ---- | ----------------------- | --------------------------------------------------------------------------------------- | ------------------- |
-| 1    | one-shot                | Prisma's own args, narrowed to view fields — relation filters, includes, related counts | none                |
-| 2    | live, incremental       | predicates over the entity's own columns                                                | none                |
-| 3    | live, re-run-on-trigger | joins/aggregates kept live                                                              | explicit, per model |
+That difference is the whole reason the two have different capability budgets. You can't join
+against rows you were never handed, so a live query is limited to predicates over the model's own
+columns, while a read can do anything Prisma can.
 
-Only tier 1 is implemented today.
+| Query         | What it can express                                                                        | Declaration         |
+| ------------- | ------------------------------------------------------------------------------------------ | ------------------- |
+| **read**      | Prisma's own args, narrowed to visible fields — relation filters, includes, related counts | none                |
+| **live**      | predicates over the model's own columns                                                    | none                |
+| _live re-run_ | joins and aggregates kept live, by re-running on an upstream change — **not built yet**    | explicit, per model |
+
+Reads work today. Live queries are in progress.
 
 ## Getting started
 
@@ -311,8 +316,8 @@ JSON-representable values; only the response is superjson-encoded.
 The token is a class rather than a symbol so it carries your client and policy registry as
 generics — `db.job` is typed from your schema, models without a policy don't exist on it, and no
 `@Inject` is needed. A scoped delegate currently exposes **`findMany` only** — `findFirst`,
-`count`, and aggregates aren't on it yet, so a read that needs one has to wait for tier 1 to grow
-them or be written against Prisma with the policy filter applied by hand.
+`count`, and aggregates aren't on it yet, so a read that needs one has to wait for the read path to
+grow them or be written against Prisma with the policy filter applied by hand.
 
 ## Postgres requirements
 

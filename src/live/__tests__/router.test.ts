@@ -68,9 +68,7 @@ describe('update — decided purely from the post-image', () => {
     const result = router.route(
       change({ kind: 'update', newRow: { id: 1, tenant: 'B', score: 9, secret: 'x' } }),
     );
-    expect(result.deltas).toEqual([
-      { kind: 'remove', subscriptionId: 's1', key: { id: 1, tenant: 'B', score: 9, secret: 'x' } },
-    ]);
+    expect(result.deltas).toEqual([{ kind: 'remove', subscriptionId: 's1', key: { id: 1 } }]);
   });
 
   it('out of scope -> in scope: upsert', () => {
@@ -88,9 +86,7 @@ describe('update — decided purely from the post-image', () => {
     const result = router.route(
       change({ kind: 'update', newRow: { id: 1, tenant: 'C', score: 9, secret: 'x' } }),
     );
-    expect(result.deltas).toEqual([
-      { kind: 'remove', subscriptionId: 's1', key: { id: 1, tenant: 'C', score: 9, secret: 'x' } },
-    ]);
+    expect(result.deltas).toEqual([{ kind: 'remove', subscriptionId: 's1', key: { id: 1 } }]);
   });
 });
 

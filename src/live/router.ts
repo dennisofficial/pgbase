@@ -49,7 +49,11 @@ export class DefaultChangeRouter implements ChangeRouter {
     undecidable: string[],
   ): void {
     if (change.kind === 'delete') {
-      deltas.push({ kind: 'remove', subscriptionId: sub.id, key: change.oldRow });
+      deltas.push({
+        kind: 'remove',
+        subscriptionId: sub.id,
+        key: sub.identify(change.oldRow ?? {}),
+      });
       return;
     }
 
@@ -69,7 +73,7 @@ export class DefaultChangeRouter implements ChangeRouter {
     if (matches) {
       deltas.push({ kind: 'upsert', subscriptionId: sub.id, row: sub.project(row) });
     } else if (change.kind === 'update') {
-      deltas.push({ kind: 'remove', subscriptionId: sub.id, key: row });
+      deltas.push({ kind: 'remove', subscriptionId: sub.id, key: sub.identify(row) });
     }
     // insert + no match: nothing to deliver.
   }

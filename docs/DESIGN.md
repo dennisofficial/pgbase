@@ -136,7 +136,13 @@ govern what is queryable, not just what is returned.
 
 ---
 
-## 3. Capability tiering — by transport, not by decorator
+## 3. Capability by transport, not by decorator
+
+> **Terminology.** The two query kinds are **read** (one-shot) and **live** (subscription), and
+> those are the names used in code (`src/read/`, `src/live/`, `POST /pgbase/read`, `useLiveQuery`)
+> and in the README. Older sections below still say **Tier 1** for read, **Tier 2** for live, and
+> **Tier 3** for the unbuilt re-run-on-trigger option. Unrelated: §7.3's **Tier A/B** is a
+> different axis entirely — a table's replica-identity choice, not a query capability.
 
 The insight that dissolved a long argument: a one-shot read and a live subscription have cost
 regimes that differ by orders of magnitude.
@@ -149,13 +155,13 @@ live       1 evaluation per relevant WAL change,    A bad one costs that, foreve
 
 So they don't get the same capability budget.
 
-| Tier  | Transport               | Capability                                                                                               | Declaration              |
-| ----- | ----------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------ |
-| **1** | one-shot                | nearly the full DSL: relation filters, depth-1/2 include, related counts, order-by-joined-column, offset | none                     |
-| **2** | live, incremental       | predicates over the entity's **own columns**                                                             | none                     |
-| **3** | live, re-run-on-trigger | joins/aggregates kept live                                                                               | **explicit, per entity** |
+| Query               | Capability                                                                                               | Declaration              |
+| ------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **read** (one-shot) | nearly the full DSL: relation filters, depth-1/2 include, related counts, order-by-joined-column, offset | none                     |
+| **live**            | predicates over the entity's **own columns**                                                             | none                     |
+| _live re-run_       | joins/aggregates kept live — not built                                                                   | **explicit, per entity** |
 
-Guardrails for Tier 1 are just RLS + `statement_timeout` + a row cap. Tier 2 is provably cheap:
+Guardrails for a read are just RLS + `statement_timeout` + a row cap. Live is provably cheap:
 one predicate evaluation per WAL row, no DB round-trip, ~zero resident state.
 
 ### Why this is the cheap answer — the survey data
