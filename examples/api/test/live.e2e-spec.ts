@@ -1,6 +1,6 @@
+import { PgbaseWireCodec } from '@dltech/pgbase/read';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PgbaseWireCodec } from '@dltech/pgbase/read';
 import 'reflect-metadata';
 import { io, type Socket } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -52,9 +52,10 @@ function subscribe(socket: Socket, model: string, where?: unknown): Promise<any>
 }
 
 function bump(id: string, user: string): Promise<Response> {
-  return fetch(`${url}/jobs/${id}/bump-priority`, {
-    method: 'POST',
-    headers: { 'x-pgbase-dev-user': user },
+  return fetch(`${url}/jobs/${id}/priority`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', 'x-pgbase-dev-user': user },
+    body: JSON.stringify({ delta: 1 }),
   });
 }
 
@@ -160,11 +161,11 @@ describe('live subscriptions, end to end through Nest', () => {
   it('lets a CORS preflight through without authenticating it', async () => {
     // A preflight carries no credentials by design. A 401 here reaches the browser as an opaque
     // CORS error, so every cross-origin write fails with nothing explaining why.
-    const res = await fetch(`${url}/jobs/00000000-0000-4000-8000-0000000a0001/bump-priority`, {
+    const res = await fetch(`${url}/jobs/00000000-0000-4000-8000-0000000a0001/priority`, {
       method: 'OPTIONS',
       headers: {
         Origin: 'http://localhost:3000',
-        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Method': 'PATCH',
         'Access-Control-Request-Headers': 'content-type,x-pgbase-dev-user',
       },
     });

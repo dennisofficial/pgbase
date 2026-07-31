@@ -1,6 +1,7 @@
 import { scopedWhere } from '../context/scoped-write.js';
 import { computeFilterable } from '../policy/filterable.js';
 import type { Policy } from '../policy/types.js';
+import type { LiveWhere } from '../query/ast.js';
 import { referencedColumns } from '../query/columns.js';
 import { normalize } from '../query/normalize.js';
 import type { ResolvedModel } from '../schema/types.js';
@@ -49,8 +50,17 @@ export interface SubscriptionInput {
 export function createSubscription(input: SubscriptionInput): Subscription {
   const { id, model, policy, claims, where = {} } = input;
   const filterable = computeFilterable(model, policy).filterable;
-  const predicate = normalize(scopedWhere(policy, claims, where), model, filterable);
-  const rlsPredicate = normalize(policy.rls(claims), model, filterable);
+
+  // The client's own filter is held to the filterable set, so an omitted column cannot be read one
+  // character at a time through a `startsWith` oracle. The policy's predicate is server-authored
+  // and is held to the model instead: a policy that omits the very column its RLS scopes on — an
+  // actor id that is always the caller, say — is a normal thing to write, and rejecting it here
+  // would make the model unsubscribable while one-shot reads of it kept working.
+  normalize(where as LiveWhere, model, filterable);
+
+  const allFields = new Set(model.fields.map((f) => f.name));
+  const predicate = normalize(scopedWhere(policy, claims, where), model, allFields);
+  const rlsPredicate = normalize(policy.rls(claims), model, allFields);
 
   return {
     id,

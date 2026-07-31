@@ -54,8 +54,11 @@ const tagPolicy = definePolicy<TagModel, Claims>('Tag')({
   rls: () => ({}),
 });
 
+// Leaving `action` filterable makes boot warn: `audit_log` is the one table deliberately left at
+// default replica identity, so an UPDATE that misses that column would force subscribers to resync
+// rather than evaluate the predicate. Accepted here because this table is append-only.
 const auditLogPolicy = definePolicy<AuditLogModel, Claims>('AuditLog')({
-  omit: ['action', 'actorId', 'at'],
+  omit: ['actorId'],
   rls: (claims) => ({ actorId: { equals: claims.userId } }),
 });
 

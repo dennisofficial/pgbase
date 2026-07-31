@@ -1,8 +1,8 @@
 import type { LiveArgs, ModelAccessor, Subscription } from './types.js';
 
 export interface RtkCacheLifecycleApi<T> {
-  readonly cacheDataLoaded: Promise<{ readonly meta?: LiveQueryMeta<T> }>;
-  readonly cacheEntryRemoved: Promise<void>;
+  readonly cacheDataLoaded: PromiseLike<{ readonly meta?: unknown }>;
+  readonly cacheEntryRemoved: PromiseLike<void>;
   updateCachedData(recipe: (draft: readonly T[]) => readonly T[] | void): unknown;
 }
 
@@ -35,7 +35,7 @@ export function liveQueryEndpoint<T, Arg = void>(
 
     async onCacheEntryAdded(_arg, api) {
       const { meta } = await api.cacheDataLoaded;
-      const subscription = meta?.subscription;
+      const subscription = (meta as LiveQueryMeta<T> | undefined)?.subscription;
       if (!subscription) return;
       const off = subscription.subscribe((rows) => api.updateCachedData(() => rows));
       await api.cacheEntryRemoved;

@@ -8,6 +8,7 @@ import type {
   LiveWhere,
 } from '@dltech/pgbase/query';
 import type { Prisma } from './generated/prisma/client.js';
+import type { ScopedDb } from './pgbase/scoped-db.js';
 import { JobStatus } from './generated/prisma/enums.js';
 
 /**
@@ -68,4 +69,31 @@ export function _conformance(): void {
 
   const _accepted: LiveWhere = q;
   void _accepted;
+}
+
+/**
+ * The scoped delegate carries Prisma's own argument and return types, and only the operations the
+ * extension knows how to scope. `upsert` and the bulk writes have no scope proof yet, so they are
+ * absent from the type rather than only throwing at runtime.
+ */
+declare const db: ScopedDb;
+
+{
+  const findMany: Prisma.JobFindManyArgs = { where: { status: JobStatus.QUEUED }, take: 5_000 };
+  void db.job.findMany(findMany);
+  void db.job.update({ where: { id: 'x' }, data: { priority: { increment: 1 } } });
+
+  // Omitted columns are stripped from browsers, not from the server process holding the client.
+  void (async () => {
+    const job = await db.job.findUniqueOrThrow({ where: { id: 'x' } });
+    const _metadata: Prisma.JsonValue = job.metadata;
+    void _metadata;
+  })();
+
+  // @ts-expect-error upsert is not scoped yet — see DEFERRED_OPERATIONS in scoped-extension.ts
+  void db.job.upsert;
+  // @ts-expect-error deleteMany cannot prove every matched row was the caller's
+  void db.job.deleteMany;
+  // @ts-expect-error JobSettings is NO_CLIENT_ACCESS, so it has no scoped delegate at all
+  void db.jobSettings;
 }

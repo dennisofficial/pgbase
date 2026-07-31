@@ -1,17 +1,21 @@
+import { PgbaseModule } from '@dltech/pgbase/nest';
 import { Module, UnauthorizedException } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { PgbaseModule } from '@dltech/pgbase/nest';
 import type { Pool } from 'pg';
 import { AppController } from './app.controller';
 import pgbaseSchema from './generated/pgbase/index';
 import { ClaimsModule, OrgMembershipClaimsBuilder, type Principal } from './pgbase/claims';
-import { JobCommandService } from './pgbase/job-command.service';
-import { JobSummaryService } from './pgbase/job-summary.service';
 import { pgbasePolicies } from './pgbase/policies';
 import { SCHEMA_POOL, SchemaPoolModule } from './pgbase/schema-pool.provider';
 import { ScopedDb } from './pgbase/scoped-db';
 import { PrismaModule } from './prisma/prisma.module';
 import { PrismaService } from './prisma/prisma.service';
+import { ActivityService } from './work/activity.service';
+import { Caller } from './work/caller';
+import { JobsController } from './work/jobs.controller';
+import { JobsService } from './work/jobs.service';
+import { TasksController } from './work/tasks.controller';
+import { TasksService } from './work/tasks.service';
 
 /**
  * DEV-ONLY principal selection: the caller names a seeded user by id in a header. There is no
@@ -77,7 +81,7 @@ function getPrincipal(req: unknown): Principal {
       scopedPrisma: ScopedDb,
     }),
   ],
-  controllers: [AppController],
-  providers: [JobSummaryService, JobCommandService],
+  controllers: [AppController, JobsController, TasksController],
+  providers: [Caller, ActivityService, JobsService, TasksService],
 })
 export class AppModule {}

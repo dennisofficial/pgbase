@@ -537,7 +537,8 @@ queries). Only the server half exists today.
 - `pnpm release` — apply pending changesets: bump the version, rewrite `CHANGELOG.md`
 - `pnpm example:up` / `example:down` — docker compose; brings up both the example database
   (`:55432`) and the test database (`:55433`)
-- `pnpm example:api` — run the example NestJS API
+- `pnpm example:seed` — migrate and seed the example database
+- `pnpm example:api` / `example:web` — run the example NestJS API and Next.js front end
 
 The build depends on `@swc/core`: tsup only emits `design:paramtypes` when it can resolve it, and
 degrades to a warning otherwise, so `postbuild` fails the build rather than shipping a package

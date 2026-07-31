@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import 'reflect-metadata';
 import { AppModule } from './app.module';
+import { configureApp } from './configure-app';
 
 try {
   process.loadEnvFile();
@@ -10,11 +11,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     forceCloseConnections: true,
   });
-  app.enableCors({
-    origin: process.env.WEB_ORIGIN ?? 'http://localhost:3000',
-    allowedHeaders: ['content-type', 'x-pgbase-dev-user'],
-  });
-  app.enableShutdownHooks();
+  configureApp(app);
   await app.listen(process.env.PORT ?? 3001);
 }
 

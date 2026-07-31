@@ -172,6 +172,7 @@
     "test:watch": "vitest",
     "example:up": "docker compose up -d",
     "example:down": "docker compose down",
+    "example:seed": "pnpm --filter @pgbase-example/api db:migrate && pnpm --filter @pgbase-example/api db:seed",
     "example:api": "pnpm --filter @pgbase-example/api dev",
     "example:web": "pnpm --filter @pgbase-example/web dev"
   },
