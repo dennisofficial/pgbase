@@ -1,8 +1,3 @@
-/**
- * The command side, over real HTTP. Nothing here is pgbase-specific except one case — the 404 that
- * ScopedRowNotFoundFilter produces — which is exactly why it is worth pinning: every other
- * behaviour below is stock Nest validation, and a reader should be able to tell the two apart.
- */
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import 'reflect-metadata';
