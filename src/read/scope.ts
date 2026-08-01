@@ -1,12 +1,20 @@
 import { scopedWhere } from '../context/scoped-write.js';
-import { normalizeClientWhere } from '../policy/filterable.js';
 import { buildProjector } from '../policy/project.js';
-import type { ProbeResult } from '../policy/types.js';
 import type { ValidatedPolicy } from '../policy/validate.js';
 import type { LiveWhere } from '../query/ast.js';
-import { QueryError } from '../query/errors.js';
 import type { ResolvedModel, ResolvedSchema } from '../schema/types.js';
 import { ReadValidationError, type ReadArgs, type ReadLimits, type ResultPlan } from './types.js';
+import {
+  clampTake,
+  label,
+  validateCursor,
+  validateDistinct,
+  validateOrderBy,
+  validateScalarSelect,
+  validateSkip,
+  validateWhere,
+  type Cardinality,
+} from './validate-args.js';
 
 export type ReadProfile = 'client' | 'server';
 
@@ -17,8 +25,6 @@ export interface ReadContext<Claims = unknown> {
   readonly limits: ReadLimits;
   readonly profile?: ReadProfile;
 }
-
-type Cardinality = 'root' | 'one' | 'many';
 
 interface Level {
   readonly args: ReadArgs;
@@ -107,204 +113,6 @@ function passThrough(row: unknown): unknown {
   return row;
 }
 
-function label(path: string): string {
-  return path || '<root>';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// where / orderBy / cursor / distinct — client input validated against filterable
-// ─────────────────────────────────────────────────────────────────────────────
-
-function validateWhere(
-  where: LiveWhere | undefined,
-  model: ResolvedModel,
-  probeResult: ProbeResult,
-  path: string,
-): LiveWhere | undefined {
-  if (where === undefined) return undefined;
-  try {
-    normalizeClientWhere(where, model, probeResult);
-  } catch (err) {
-    if (err instanceof QueryError) {
-      throw new ReadValidationError(
-        model.model,
-        path,
-        `Model "${model.model}" at "${label(path)}": ${err.message}`,
-      );
-    }
-    throw err;
-  }
-  return where;
-}
-
-function validateOrderBy(
-  orderBy: unknown,
-  probeResult: ProbeResult,
-  model: ResolvedModel,
-  path: string,
-): unknown {
-  if (orderBy === undefined) return undefined;
-  const items = Array.isArray(orderBy) ? orderBy : [orderBy];
-  for (const item of items) {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      throw new ReadValidationError(
-        model.model,
-        path,
-        `Model "${model.model}" at "${label(path)}": "orderBy" entries must be objects.`,
-      );
-    }
-    for (const [field, dir] of Object.entries(item as Record<string, unknown>)) {
-      if (!probeResult.filterable.has(field)) {
-        throw new ReadValidationError(
-          model.model,
-          path,
-          `Model "${model.model}" at "${label(path)}": cannot order by "${field}" — it is not ` +
-            `filterable (a hidden column would be a sort oracle).`,
-        );
-      }
-      if (dir !== 'asc' && dir !== 'desc') {
-        throw new ReadValidationError(
-          model.model,
-          path,
-          `Model "${model.model}" at "${label(path)}": orderBy["${field}"] must be "asc" or "desc".`,
-        );
-      }
-    }
-  }
-  return orderBy;
-}
-
-function validateCursor(
-  cursor: Record<string, unknown> | undefined,
-  probeResult: ProbeResult,
-  model: ResolvedModel,
-  path: string,
-): Record<string, unknown> | undefined {
-  if (cursor === undefined) return undefined;
-  for (const field of Object.keys(cursor)) {
-    if (!probeResult.filterable.has(field)) {
-      throw new ReadValidationError(
-        model.model,
-        path,
-        `Model "${model.model}" at "${label(path)}": cannot cursor on "${field}" — it is not filterable.`,
-      );
-    }
-  }
-  return cursor;
-}
-
-function validateDistinct(
-  distinct: unknown,
-  probeResult: ProbeResult,
-  model: ResolvedModel,
-  path: string,
-): unknown {
-  if (distinct === undefined) return undefined;
-  const items = Array.isArray(distinct) ? distinct : [distinct];
-  for (const field of items) {
-    if (typeof field !== 'string' || !probeResult.filterable.has(field)) {
-      throw new ReadValidationError(
-        model.model,
-        path,
-        `Model "${model.model}" at "${label(path)}": cannot select distinct on "${String(field)}" — ` +
-          `it is not filterable.`,
-      );
-    }
-  }
-  return distinct;
-}
-
-function validateScalarSelect(
-  select: Record<string, unknown> | undefined,
-  model: ResolvedModel,
-  probeResult: ProbeResult,
-  path: string,
-): void {
-  if (!select) return;
-  const relationNames = new Set(model.relations.map((r) => r.name));
-  for (const [key, value] of Object.entries(select)) {
-    if (key === '_count' || relationNames.has(key)) continue;
-    if (value === false || value === undefined) continue;
-
-    const field = model.fields.find((f) => f.name === key);
-    if (!field) {
-      throw new ReadValidationError(
-        model.model,
-        path,
-        `Model "${model.model}" at "${label(path)}": unknown field "${key}" in "select".`,
-      );
-    }
-    if (!probeResult.filterable.has(key)) {
-      throw new ReadValidationError(
-        model.model,
-        path,
-        `Model "${model.model}" at "${label(path)}": field "${key}" is omitted by this model's ` +
-          `policy and cannot be selected.`,
-      );
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// take / skip
-// ─────────────────────────────────────────────────────────────────────────────
-
-function clampTake(
-  take: number | undefined,
-  limits: ReadLimits,
-  model: ResolvedModel,
-  path: string,
-  cardinality: Cardinality,
-): number | undefined {
-  if (cardinality === 'one') {
-    if (take !== undefined) {
-      throw new ReadValidationError(
-        model.model,
-        path,
-        `Model "${model.model}" at "${label(path)}": "take" is not valid on a to-one relation.`,
-      );
-    }
-    return undefined;
-  }
-  if (take === undefined) return limits.maxRows;
-  if (!Number.isInteger(take) || take <= 0) {
-    throw new ReadValidationError(
-      model.model,
-      path,
-      `Model "${model.model}" at "${label(path)}": "take" must be a positive integer.`,
-    );
-  }
-  return Math.min(take, limits.maxRows);
-}
-
-function validateSkip(
-  skip: number | undefined,
-  model: ResolvedModel,
-  path: string,
-  cardinality: Cardinality,
-): number | undefined {
-  if (skip === undefined) return undefined;
-  if (cardinality === 'one') {
-    throw new ReadValidationError(
-      model.model,
-      path,
-      `Model "${model.model}" at "${label(path)}": "skip" is not valid on a to-one relation.`,
-    );
-  }
-  if (!Number.isInteger(skip) || skip < 0) {
-    throw new ReadValidationError(
-      model.model,
-      path,
-      `Model "${model.model}" at "${label(path)}": "skip" must be a non-negative integer.`,
-    );
-  }
-  return skip;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// select/include → relations, always rewritten as `include` (transform needs the full row)
-// ─────────────────────────────────────────────────────────────────────────────
-
 interface WalkedRelations {
   readonly select?: Record<string, unknown>;
   readonly include?: Record<string, unknown>;
@@ -343,8 +151,6 @@ function walkRelations<Claims>(
     const relation = relationsByName.get(key);
     if (!relation) {
       if (isSelect) {
-        // A scalar field. The client profile has already validated it and drops it, because its
-        // projector needs the whole row; the server profile passes it through untouched.
         if (trusted) out[key] = value;
         continue;
       }
@@ -376,8 +182,6 @@ function walkRelations<Claims>(
   }
 
   if (Object.keys(out).length === 0) return { relations, hasCount };
-  // The client profile always rewrites to `include` — its projector decides what comes back, so it
-  // needs Prisma to return the full row. A server caller's `select` means what it says.
   return trusted && isSelect
     ? { select: out, relations, hasCount }
     : { include: out, relations, hasCount };
@@ -398,10 +202,6 @@ function normalizeNestedValue(
       `query object.`,
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _count — only over relations whose target model has a client-accessible policy
-// ─────────────────────────────────────────────────────────────────────────────
 
 function buildCount<Claims>(
   model: ResolvedModel,
@@ -457,9 +257,6 @@ function buildCount<Claims>(
           `"${relation.targetModel}", which has no client-accessible policy.`,
       );
     }
-    // `true` still needs the predicate. A relation's rows are not all in scope just because the
-    // parent row is — a Task can carry a different orgId than its Job — so an unfiltered count is a
-    // count of rows the caller cannot read.
     if (value === true) {
       outSelect[key] = { where: scopedWhere(targetValidated.policy, ctx.claims, {}) };
       continue;
@@ -479,11 +276,6 @@ function buildCount<Claims>(
 
   return { select: outSelect };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _count is a plain number pulled from Prisma's row, not a policy-governed relation — merge it
-// back onto the projected view rather than teaching ResultPlan a second kind of node.
-// ─────────────────────────────────────────────────────────────────────────────
 
 function withCount(
   project: (row: unknown) => unknown,

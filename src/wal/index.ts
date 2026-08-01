@@ -6,6 +6,8 @@ export {
   parsePgArrayLiteral,
 } from './decode.js';
 export type { DecodedChange } from './decode.js';
+export { encodeColumn } from './encode.js';
+export type { RowEncodeOptions } from './encode.js';
 export { createWalLeader } from './leader.js';
 export type { WalLeaderDependencies } from './leader.js';
 export { TOAST_UNCHANGED } from './pgoutput-messages.js';

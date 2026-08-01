@@ -49,6 +49,7 @@ export class PgbaseLiveGateway implements OnApplicationBootstrap, OnApplicationS
       contextStore: this.contextStore,
       claims: this.claimsCache,
       wire: this.wire,
+      decimalConstructor: this.options.decimalConstructor,
       getPrincipal: this.options.getPrincipal,
       wal: this.options.live,
       argsLimits: this.options.argsLimits ?? DEFAULT_ARGS_TREE_LIMITS,

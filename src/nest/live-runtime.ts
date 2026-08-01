@@ -52,6 +52,7 @@ export interface PgbaseLiveRuntimeOptions {
   readonly contextStore: ContextStore;
   readonly claims: ClaimsCache;
   readonly wire: WireCodec;
+  readonly decimalConstructor?: (value: string) => unknown;
   readonly getPrincipal: (req: unknown) => unknown;
   readonly wal: LiveWalOptions;
   readonly argsLimits?: ArgsTreeLimits;
@@ -237,6 +238,7 @@ export class PgbaseLiveRuntime {
           policy: validated.policy,
           claims: state.claims,
           where: clientWhere,
+          encode: { decimalConstructor: this.opts.decimalConstructor },
         }),
       );
       this.unregisterById.set(id, unregister);
