@@ -52,6 +52,15 @@ jobs:
       # `prepare` runs tsup, so dist/ and the .d.ts/.d.mts trees are built here.
       - run: pnpm install --frozen-lockfile
 
+      # examples/api/src/generated/** is gitignored, and the package's own tests import from
+      # it, so a clean checkout cannot typecheck until Prisma's generators have run. The
+      # test setup runs them too, but that is after this step. `generate` never connects,
+      # so the URL only has to parse.
+      - name: Generate example clients
+        run: pnpm --filter @pgbase-example/api exec prisma generate
+        env:
+          DATABASE_URL: postgresql://pgbase:pgbase@localhost:55433/pgbase_test
+
       - name: Typecheck
         run: pnpm typecheck
 
