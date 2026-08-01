@@ -1,5 +1,9 @@
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
-import { AsyncLocalStorageContextStore, MemoryClaimsCache } from '../context/index.js';
+import {
+  AsyncLocalStorageContextStore,
+  MemoryClaimsCache,
+  toPgbaseRequest,
+} from '../context/index.js';
 import { PGBASE_OPTIONS } from './tokens.js';
 import type { PgbaseModuleOptions } from './types.js';
 
@@ -18,7 +22,7 @@ export class PgbaseContextMiddleware implements NestMiddleware {
     }
 
     try {
-      const principal = this.options.getPrincipal(req);
+      const principal = this.options.getPrincipal(toPgbaseRequest(req, 'http'));
       const claims = await this.claimsCache.get(principal);
       this.contextStore.run({ principal, claims }, () => next());
     } catch (err) {

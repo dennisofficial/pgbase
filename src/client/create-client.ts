@@ -22,7 +22,8 @@ export function createClient<Models extends object>(
     get(_target, prop): unknown {
       if (prop === '$status') return (): ConnectionStatus => core.status();
       if (prop === '$onStatusChange') return core.onStatusChange.bind(core);
-      if (prop === '$setAuth') return (v: Parameters<typeof toGetAuth>[0]) => core.setAuth(toGetAuth(v));
+      if (prop === '$setAuth')
+        return (v: Parameters<typeof toGetAuth>[0]) => core.setAuth(toGetAuth(v));
       if (prop === '$dispose') return (): void => core.dispose();
       if (typeof prop !== 'string') return undefined;
 

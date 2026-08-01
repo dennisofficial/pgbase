@@ -1,3 +1,3 @@
 export { SchemaResolutionError } from './errors.js';
-export { PgCatalogSchemaProvider } from './resolver.js';
+export { DEFAULT_PUBLICATION, PgCatalogSchemaProvider } from './resolver.js';
 export * from './types.js';

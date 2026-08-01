@@ -1,8 +1,8 @@
 import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestPool } from '../../schema/test-support.js';
-import type { ChangeEvent, WalEvent } from '../../wal/types.js';
 import { waitFor } from '../../wal/__tests__/support.js';
+import type { ChangeEvent, WalEvent } from '../../wal/types.js';
 import { NOTIFY_PAYLOAD_LIMIT, PostgresChangeTransport } from '../postgres.js';
 
 const CHANNEL = 'pgbase_transport_test_channel';

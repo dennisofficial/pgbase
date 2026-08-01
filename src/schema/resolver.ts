@@ -176,6 +176,8 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
       };
     });
 
+    await this.warnIfGuardCannotRun(models);
+
     const byModel = new Map(models.map((m) => [m.model, m]));
     const byTable = new Map(models.map((m) => [tableKey(m.namespace, m.table), m]));
 
@@ -321,6 +323,24 @@ export class PgCatalogSchemaProvider implements SchemaProvider {
       result.set(row.reloid, forTable);
     }
     return result;
+  }
+
+  private async warnIfGuardCannotRun(models: readonly ResolvedModel[]): Promise<void> {
+    const full = models.filter((m) => m.replicaIdentity === 'full');
+    if (full.length === 0) return;
+
+    const { rowCount } = await this.pool.query('SELECT 1 FROM pg_publication WHERE pubname = $1', [
+      this.publication,
+    ]);
+    if (rowCount !== 0) return;
+
+    console.warn(
+      `[pgbase] No publication named "${this.publication}" exists, but ` +
+        `${full.map((m) => `"${m.model}"`).join(', ')} ${full.length === 1 ? 'is' : 'are'} ` +
+        `REPLICA IDENTITY FULL. That combination is only safe to assume because the publication ` +
+        `could not be read — if it is later created with a column list, every UPDATE and DELETE ` +
+        `on those tables starts failing at write time. Check the "publication" option.`,
+    );
   }
 
   private async fetchPublicationColumns(

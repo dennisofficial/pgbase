@@ -19,11 +19,16 @@ before adding a page:
 
 ## `src/pgbase/client.ts` is the whole client surface
 
-One `createClient` for the app, plus **hand-written row types** — nothing generates client-side row
-types yet, so the `Models` interface is maintained by hand and must mirror `examples/api`'s
-policies. The mirroring is load-bearing: `AuditLog` has no `actorId` because the policy omits it
-server-side, and `Invoice.amount` is `string` because `Decimal(18,4)` does not survive a JS number.
-A type that claims a column the policy strips is a lie the compiler cannot catch.
+One `createClient` for the app. Row types come from `@api/generated/pgbase/models` — emitted by the
+same `prisma generate` the API runs, reached through the `@api/*` path alias in `tsconfig.json`, and
+types-only so nothing crosses into the bundle at runtime. `Invoice.amount` is `string` there because
+`Decimal(18,4)` does not survive a JS number.
+
+**Two things the generator cannot know and this file must restate**, because policies are
+TypeScript and `prisma generate` runs before them: a model with `NO_CLIENT_ACCESS` is unreachable
+(`JobSettings`), and a column a policy `omit`s never reaches the wire (`AuditLog.actorId`). Both are
+subtracted from `PgbaseModels` where the client is built. A type that claims a column the policy
+strips is still a lie the compiler cannot catch — that subtraction is the only thing preventing it.
 
 Identity is a dev stand-in (`DEV_USERS`, a header, per-tab `sessionStorage`). `setCurrentUser` calls
 `pgbase.$setAuth` even though the getter is unchanged — re-setting it reconnects the socket, which

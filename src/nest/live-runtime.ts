@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto';
 import type { Server as NodeHttpServer } from 'node:http';
 import type { ClientConfig, Pool } from 'pg';
 import { Server as SocketIOServer, type Socket as IoSocket, type ServerOptions } from 'socket.io';
-import type { ClaimsCache, ContextStore } from '../context/index.js';
+import {
+  toPgbaseRequest,
+  type ClaimsCache,
+  type ContextStore,
+  type PgbaseRequest,
+} from '../context/index.js';
 import {
   PGBASE_DELTA,
   PGBASE_SUBSCRIBE,
@@ -53,7 +58,7 @@ export interface PgbaseLiveRuntimeOptions {
   readonly claims: ClaimsCache;
   readonly wire: WireCodec;
   readonly decimalConstructor?: (value: string) => unknown;
-  readonly getPrincipal: (req: unknown) => unknown;
+  readonly getPrincipal: (req: PgbaseRequest) => unknown;
   readonly wal: LiveWalOptions;
   readonly argsLimits?: ArgsTreeLimits;
   readonly readLimits?: ReadLimits;
@@ -160,7 +165,7 @@ export class PgbaseLiveRuntime {
   // ── connection lifecycle ───────────────────────────────────────────────────────────────────
 
   private async authenticate(socket: IoSocket): Promise<void> {
-    const principal = this.opts.getPrincipal(socket.handshake);
+    const principal = this.opts.getPrincipal(toPgbaseRequest(socket.handshake, 'socket'));
     const claims = await this.opts.claims.get(principal);
     this.bySocket.set(socket.id, { principal, claims, owned: new Set() });
   }

@@ -3,6 +3,7 @@ import type { ValidatedPolicy } from '../policy/index.js';
 import { validatePolicies } from '../policy/index.js';
 import type { ResolvedSchema, SchemaProvider } from '../schema/index.js';
 import { PgCatalogSchemaProvider } from '../schema/index.js';
+import { PgbasePoolHost } from './pool.js';
 import { PGBASE_OPTIONS, type Resolved } from './tokens.js';
 import type { PgbaseModuleOptions } from './types.js';
 
@@ -12,12 +13,15 @@ export abstract class PgbaseSchemaProvider implements SchemaProvider {
 
 @Injectable()
 export class PgCatalogSchemaProviderService extends PgbaseSchemaProvider {
-  constructor(@Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions) {
+  constructor(
+    @Inject(PGBASE_OPTIONS) private readonly options: PgbaseModuleOptions,
+    private readonly poolHost: PgbasePoolHost,
+  ) {
     super();
   }
 
   resolve(): Promise<ResolvedSchema> {
-    return new PgCatalogSchemaProvider(this.options.schema, this.options.pool, {
+    return new PgCatalogSchemaProvider(this.options.schema, this.poolHost.pool, {
       publication: this.options.publication,
     }).resolve();
   }

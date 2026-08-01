@@ -8,8 +8,8 @@ import type {
   LiveWhere,
 } from '@dltech/pgbase/query';
 import type { Prisma } from './generated/prisma/client.js';
-import type { ScopedDb } from './pgbase/scoped-db.js';
 import { JobStatus } from './generated/prisma/enums.js';
+import type { ScopedDb } from './pgbase/scoped-db.js';
 
 /**
  * Compile-time proof that pgbase's wire filters are a SUBSET of Prisma's, so a `where` written

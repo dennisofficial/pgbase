@@ -3,11 +3,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { SCHEMA_FORMAT_VERSION } from '../version.js';
 import { dmmfToStaticSchema, GeneratorValidationError } from './dmmf-to-static.js';
+import { emitModelTypesModule } from './emit-models.js';
 import { emitStaticSchemaModule } from './emit.js';
 
 const DEFAULT_OUTPUT = '../src/generated/pgbase';
 const DEFAULT_PACKAGE_SPECIFIER = '@dltech/pgbase/schema';
 const OUTPUT_FILE_NAME = 'index.ts';
+const MODELS_FILE_NAME = 'models.ts';
 
 export function runGenerator(): void {
   generatorHandler({
@@ -61,4 +63,9 @@ async function onGenerate(options: GeneratorOptions): Promise<void> {
 
   await mkdir(outputDir, { recursive: true });
   await writeFile(path.join(outputDir, OUTPUT_FILE_NAME), source, 'utf-8');
+  await writeFile(
+    path.join(outputDir, MODELS_FILE_NAME),
+    emitModelTypesModule(staticSchema),
+    'utf-8',
+  );
 }

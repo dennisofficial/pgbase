@@ -49,17 +49,17 @@ declared as such, so nothing is pulled in for a side of the stack you aren't bui
 pnpm add @dltech/pgbase
 ```
 
-| you're building             | also install                                          |
-| --------------------------- | ----------------------------------------------------- |
-| the Nest server             | `@nestjs/common` `@nestjs/core` `@prisma/client` `pg` |
-| live subscriptions (server) | `socket.io`                                           |
-| a client (browser or node)  | `socket.io-client`                                    |
-| the React hook              | `react` 19+                                           |
-| the RTK Query binding       | `@reduxjs/toolkit` 2+                                 |
+| you're building             | also install                                     |
+| --------------------------- | ------------------------------------------------ |
+| the Nest server             | `@nestjs/common` `@nestjs/core` `@prisma/client` |
+| live subscriptions (server) | `socket.io`                                      |
+| a client (browser or node)  | `socket.io-client`                               |
+| the React hook              | `react` 19+                                      |
+| the RTK Query binding       | `@reduxjs/toolkit` 2+                            |
 
-Node 20+, Prisma 7, NestJS 11, PostgreSQL 15+. `pg` is a direct dependency of pgbase, but you
-construct the `Pool` yourself and hand it to the module, so depend on it explicitly rather than
-reaching through pgbase's copy.
+Node 20+, Prisma 7, NestJS 11, PostgreSQL 15+. `pg` is a direct dependency of pgbase, so a
+connection string is all the module needs; add `pg` to your own dependencies only if you construct
+a `Pool` to hand it.
 
 ### 1. Configure Postgres
 
@@ -205,15 +205,15 @@ is computed.
 
 ### 4. Register the module
 
-`forRootAsync` takes the Prisma client and the schema pool from the container, so you build them
-the ordinary way rather than at module scope:
+`forRootAsync` takes the Prisma client and your claims builder from the container, so you build
+them the ordinary way rather than at module scope:
 
 ```ts
 PgbaseModule.forRootAsync({
-  imports: [PrismaModule, SchemaPoolModule, ClaimsModule],
-  inject: [PrismaService, SCHEMA_POOL, OrgMembershipClaimsBuilder],
-  useFactory: (prisma: PrismaService, pool: Pool, claimsBuilder: OrgMembershipClaimsBuilder) => ({
-    pool,
+  imports: [PrismaModule, ClaimsModule],
+  inject: [PrismaService, OrgMembershipClaimsBuilder],
+  useFactory: (prisma: PrismaService, claimsBuilder: OrgMembershipClaimsBuilder) => ({
+    connectionString: process.env.DATABASE_URL,
     prisma,
     schema: pgbaseSchema, // the generated artifact from step 2
     policies: pgbasePolicies,
@@ -221,9 +221,7 @@ PgbaseModule.forRootAsync({
     getPrincipal, // pulls the authenticated principal off the request
     // Omit `live` entirely and you get reads only: no replication connection, no socket server.
     live: {
-      replicationConfig: { connectionString: process.env.DATABASE_URL },
       slotName: 'pgbase_myapp',
-      publication: 'pgbase',
       socketIoOptions: { cors: { origin: 'https://app.example.com' } },
     },
   }),
@@ -236,21 +234,36 @@ PgbaseModule.forRootAsync({
 while the module definition is built — the DI token and the controller's route exist before any
 provider runs.
 
+**The connection.** pgbase reads `pg_catalog` over a plain `pg` pool, separate from Prisma's. Give
+it `connectionString` and it builds that pool and closes it on shutdown; give it `pool` instead and
+it uses yours and never ends it, since ending a pool your app also queries through would close
+connections out from under it. Passing both is an error rather than a silent precedence rule.
+
 The rest of the options, all optional:
 
-| option               | what it does                                                               |
-| -------------------- | -------------------------------------------------------------------------- |
-| `live`               | turns on the WAL leader and the socket.io gateway; absent means reads only |
-| `publication`        | publication name used by boot-time schema resolution (default `pgbase`)    |
-| `routePrefix`        | the read controller's route (default `pgbase`, so `POST /pgbase/read`)     |
-| `limits`             | read result limits — max rows, max depth                                   |
-| `argsLimits`         | bounds on the incoming `args` tree, checked before anything walks it       |
-| `serializers`        | extra wire types beyond the built-ins                                      |
-| `decimalConstructor` | makes `numeric` deltas arrive as `Decimal` rather than a string            |
-| `claimsCacheOptions` | TTL and size of the per-principal claims cache                             |
-| `schemaProvider`     | replaces `pg_catalog` resolution, mostly for tests                         |
+| option               | what it does                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| `live`               | turns on the WAL leader and the socket.io gateway; absent means reads only                 |
+| `publication`        | publication name, read by **both** schema resolution and the WAL leader (default `pgbase`) |
+| `routePrefix`        | the read controller's route (default `pgbase`, so `POST /pgbase/read`)                     |
+| `limits`             | read result limits — max rows, statement timeout                                           |
+| `argsLimits`         | bounds on the incoming `args` tree, checked before anything walks it                       |
+| `serializers`        | extra wire types beyond the built-ins                                                      |
+| `decimalConstructor` | makes `numeric` deltas arrive as `Decimal` rather than a string                            |
+| `claimsCacheOptions` | TTL and size of the per-principal claims cache                                             |
+| `schemaProvider`     | replaces `pg_catalog` resolution, mostly for tests                                         |
 
-The `live` block needs a database that has been prepared for it — a role with `REPLICATION`, and a
+`publication` is one option on purpose, not one per consumer. A resolver pointed at a publication
+that does not exist reads as "published, no column list" and quietly stops enforcing the
+`REPLICA IDENTITY FULL` guard, so a second knob that could disagree with the leader's would be a
+safety hole rather than a convenience.
+
+Inside `live`, `replicationConfig` defaults to `connectionString` and only needs setting when your
+app connects through a transaction pooler — the replication protocol needs the primary directly. If
+you passed a `pool` rather than a `connectionString` there is nothing to default from, and pgbase
+says so instead of guessing a host.
+
+The `live` block also needs a database prepared for it: a role with `REPLICATION`, and a
 publication you create in a migration. Both are covered under
 [Postgres requirements](#live-subscriptions--what-the-wal-leader-needs); the leader checks them at
 boot and fails with the exact DDL to run.
@@ -266,10 +279,11 @@ pgbase stops the WAL leader in `onApplicationShutdown`, which releases the repli
 standby instance takes over immediately. Nest only fires that hook on `SIGTERM`/`SIGINT` if
 shutdown hooks are enabled, and it is off by default. Without this line the leader dies still
 holding the slot, and every rolling deploy costs a live-update gap of up to `wal_sender_timeout`.
-This is the one thing pgbase cannot do for you: `enableShutdownHooks()` lives on the application
-instance, which a module has no reference to.
+This is the one thing pgbase cannot do for you — `enableShutdownHooks()` lives on the application
+instance, which a module has no reference to — so instead the gateway warns at boot if nothing in
+the process is listening for `SIGTERM`.
 
-The `pool` is used once, at boot, to resolve the generated artifact against `pg_catalog` for
+The connection is used once at boot to resolve the generated artifact against `pg_catalog` for
 physical type OIDs and the join tables Prisma hides — never for queries. That resolution is also
 the boot check, and it is deliberately fatal: it fails on a model with no primary key, on a schema
 that has drifted from the database, and on `REPLICA IDENTITY FULL` combined with a publication
@@ -340,10 +354,11 @@ a row belonging to someone else raises `ScopedRowNotFoundError` — deliberately
 row that doesn't exist, because distinguishing the two is itself a disclosure. Nested relation
 writes under `data` are rejected: a nested create writes a row the policy never saw.
 
-pgbase's own exception filter maps `ReadValidationError` to 400 and `ScopeViolationError` to 403;
-`ScopedRowNotFoundError` is left to you, since only your app knows whether it should surface as a
-404 or as something quieter. One `@Catch(ScopedRowNotFoundError)` filter is enough, and keeps every
-service free of `.catch(...)` plumbing.
+pgbase's own exception filter maps all three: `ReadValidationError` to 400, `ScopeViolationError`
+to 403, and `ScopedRowNotFoundError` to **404** — never 403, because a distinct status would
+confirm the row exists, which is the disclosure the error exists to prevent. To answer differently,
+catch it in your own service and throw; global filters are selected first-match in registration
+order, so shadowing pgbase's from another module is order-dependent rather than a contract.
 
 The bulk operations — `upsert`, `createMany`, `updateMany`, `deleteMany`, and the `*AndReturn`
 variants — are not scoped yet and throw an error naming why (a bulk update has no single post-image
@@ -355,11 +370,14 @@ site.
 ```ts
 // pgbase/client.ts — one client for the whole app
 import { createClient } from '@dltech/pgbase/client';
+import type { PgbaseModels } from '../generated/pgbase/models';
 
-interface Models {
-  Job: Job;
-  Task: Task;
-}
+// The generator emits one interface per model plus this map. Restate the two things it cannot
+// know, because policies are TypeScript and it runs before them: models with NO_CLIENT_ACCESS,
+// and columns a policy omits.
+type Models = Omit<PgbaseModels, 'JobSettings' | 'AuditLog'> & {
+  readonly AuditLog: Omit<PgbaseModels['AuditLog'], 'actorId'>;
+};
 
 export const pgbase = createClient<Models>({
   baseUrl: 'https://api.example.com',
@@ -378,10 +396,13 @@ const jobs = await pgbase.Job.findMany({
 const job = await pgbase.Job.findOne({ where: { id } }); // take: 1, or null
 ```
 
-The keys of `Models` are **Prisma model names**, and their values are the row types you expect back
-— hand-written today, since nothing generates client-side row types yet. `getAuth` is called per
-request and per socket (re)connection rather than captured once, so a token that expires mid-session
-refreshes itself; creating the client opens nothing.
+The keys of `Models` are **Prisma model names**. `generated/pgbase/models.ts` comes from the same
+`prisma generate` as everything else and is types-only, so importing it into a browser bundle emits
+nothing; scalars are mapped to what the wire actually delivers, which means `bigint`, `Date` and
+`Uint8Array` survive and `Decimal` arrives as `string` unless the server was given a
+`decimalConstructor`. `getAuth` is called per request and per socket (re)connection rather than
+captured once, so a token that expires mid-session refreshes itself; creating the client opens
+nothing.
 
 Under the hood that is `POST /{routePrefix}/read` with a body of `{ model, args }`, where `args`
 accepts `where`, `select`, `include`, `orderBy`, `take`, `skip`, `cursor`, and `distinct` — any
@@ -395,23 +416,26 @@ body is plain JSON, so `args` can only carry JSON-representable values.
 hand in your own `io(...)` if your bundler needs socket.io-client constructed on your side. The
 socket connects lazily, on the first live query.
 
-Authentication is yours: pgbase calls the `getPrincipal(req)` you supplied and never looks at the
-request itself, so whatever your app already uses — cookie, bearer token, session — keeps working
-unchanged. One catch worth knowing before step 6: a browser cannot set headers on a WebSocket
-handshake, so on a socket your `getAuth` values arrive in socket.io's `auth` payload instead.
-`getPrincipal` receives the HTTP request in one case and the socket handshake in the other, and has
-to read both:
+Authentication is yours: pgbase calls the `getPrincipal(req)` you supplied and never inspects
+credentials itself, so whatever your app already uses — cookie, bearer token, session — keeps
+working unchanged. It is called once per HTTP request and once per socket connection, and gets the
+same normalized `PgbaseRequest` either way:
 
 ```ts
-function getPrincipal(req: unknown): Principal {
-  const { headers, auth } = req as {
-    headers?: Record<string, string>;
-    auth?: Record<string, string>;
-  };
-  const token = headers?.authorization ?? auth?.authorization;
+function getPrincipal(req: PgbaseRequest): Principal {
+  const token = req.credential('authorization'); // headers first, then handshake auth
+  if (!token) throw new UnauthorizedException();
   // …verify and return your principal
 }
 ```
+
+That normalization exists because the two transports genuinely disagree and cannot be reconciled by
+the app: a browser WebSocket cannot set request headers, so socket.io carries them in a handshake
+`auth` payload instead. Written by hand, `getPrincipal` reads the header, works over HTTP, ships,
+and leaves every socket unauthenticated — a failure that looks like "live queries are broken".
+`credential()` checks both; `headers`, `auth`, `kind` and the untouched `raw` object are all there
+when you need something more specific. `auth` is only ever populated for a socket, so an HTTP body
+shaped like a handshake cannot smuggle a credential past the header path.
 
 ### 6. Subscribe
 
@@ -492,6 +516,9 @@ Prisma has no concept of a publication, so nothing in `prisma migrate` will ever
 cannot create it for you either: `CREATE PUBLICATION ... FOR ALL TABLES` requires superuser, which
 most production databases deliberately withhold from the application role. So it goes in a
 migration you write once:
+
+`prisma migrate dev --create-only` gives you the empty, correctly-timestamped migration to put it
+in:
 
 ```sql
 -- prisma/migrations/<timestamp>_pgbase_publication/migration.sql
@@ -676,7 +703,7 @@ SELECT relname, relreplident FROM pg_class WHERE relname = 'jobs';  -- 'f' = FUL
 | `@dltech/pgbase/client`    | `createClient`, `liveQueryEndpoint`, `isLiveSerializable`, `PgbaseWireCodec`            |
 | `@dltech/pgbase/react`     | `useLiveQuery`                                                                          |
 | `@dltech/pgbase/policy`    | `definePolicy`, `NO_CLIENT_ACCESS`, `PolicyRegistry`, validation                        |
-| `@dltech/pgbase/context`   | `ClaimsBuilder`, the claims cache, scoped-write assertions                              |
+| `@dltech/pgbase/context`   | `ClaimsBuilder`, `PgbaseRequest`, the claims cache, scoped-write assertions             |
 | `@dltech/pgbase/query`     | the query AST, `normalize`, `evaluate`, `compileSql`                                    |
 | `@dltech/pgbase/read`      | read scoping, result plans, the wire codec                                              |
 | `@dltech/pgbase/schema`    | `PgCatalogSchemaProvider` and resolved-schema types                                     |
@@ -685,8 +712,9 @@ SELECT relname, relreplident FROM pg_class WHERE relname = 'jobs';  -- 'f' = FUL
 | `@dltech/pgbase/transport` | the change transport (Postgres `NOTIFY` / Redis fan-out) and its codec                  |
 | `@dltech/pgbase`           | _empty_ — the root entry exports nothing; import from a subpath                         |
 
-The package also ships the `pgbase` binary, which is what `provider = "pgbase"` in a generator
-block resolves to.
+The package also ships the `pgbase` binary. With no arguments it is the Prisma generator that
+`provider = "pgbase"` resolves to — it emits `index.ts` (the runtime schema) and `models.ts` (the
+client row types). With a command it is a setup helper: `pgbase publication --help`.
 
 `query` is dependency-light on purpose: the same `evaluate` runs on the server against WAL tuples,
 and is meant to run in the browser too, to fan one socket-level subscription out to many component

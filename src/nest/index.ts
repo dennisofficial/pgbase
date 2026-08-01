@@ -11,6 +11,7 @@ import type { PolicyEntry } from '../policy/index.js';
 import { PgbaseContextMiddleware } from './context-middleware.js';
 import { PgbaseExceptionFilter } from './exception-filter.js';
 import { PgbaseLiveGateway } from './live-gateway.js';
+import { PgbasePoolHost } from './pool.js';
 import { createPgbaseReadController } from './read-controller.js';
 import { PgbaseReadService } from './read-service.js';
 import {
@@ -30,6 +31,7 @@ export { PgbaseExceptionFilter } from './exception-filter.js';
 export { PgbaseLiveGateway } from './live-gateway.js';
 export { PgbaseLiveRuntime } from './live-runtime.js';
 export type { LiveWalOptions, PgbaseLiveRuntimeOptions } from './live-runtime.js';
+export { PgbasePoolHost } from './pool.js';
 export { PgbaseReadService } from './read-service.js';
 export {
   PgCatalogSchemaProviderService,
@@ -96,6 +98,7 @@ export class PgbaseModule implements NestModule {
           provide: PgbaseSchemaProvider,
           useClass: options.schemaProvider ?? PgCatalogSchemaProviderService,
         },
+        PgbasePoolHost,
         schemaRegistryProvider,
         AsyncLocalStorageContextStore,
         MemoryClaimsCache,

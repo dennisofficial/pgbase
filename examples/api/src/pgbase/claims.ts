@@ -1,5 +1,5 @@
-import { Injectable, Module, UnauthorizedException } from '@nestjs/common';
 import type { ClaimsBuilder } from '@dltech/pgbase/context';
+import { Injectable, Module, UnauthorizedException } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 

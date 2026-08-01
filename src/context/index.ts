@@ -1,5 +1,7 @@
 export { MemoryClaimsCache } from './claims-cache.js';
 export type { MemoryClaimsCacheOptions } from './claims-cache.js';
+export { toPgbaseRequest } from './request.js';
+export type { PgbaseRequest } from './request.js';
 export { assertCreateInScope, assertUpdateStaysInScope, scopedWhere } from './scoped-write.js';
 export { AsyncLocalStorageContextStore, requireContext } from './store.js';
 export { ScopeViolationError } from './types.js';

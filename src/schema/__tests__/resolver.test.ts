@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { SCHEMA_FORMAT_VERSION } from '../../version.js';
 import { PgCatalogSchemaProvider } from '../resolver.js';
 import { createTestPool } from '../test-support.js';
@@ -49,6 +49,17 @@ function field(
 }
 
 let pool: Pool;
+
+/** Snapshots the calls before restoring: `mockRestore` clears them, so asserting after sees none. */
+async function captureWarnings(run: () => Promise<unknown>): Promise<string[]> {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    await run();
+    return warn.mock.calls.map((args) => String(args[0]));
+  } finally {
+    warn.mockRestore();
+  }
+}
 
 beforeAll(() => {
   pool = createTestPool();
@@ -381,6 +392,55 @@ describe('PgCatalogSchemaProvider — boot validation', () => {
 
       expect(resolved.publication).toBe('some_other_publication');
       expect(resolved.byModel.get('FullPlusList')?.publicationColumns).toBeNull();
+    });
+
+    // The failure this guards: a publication name that matches nothing looks identical to
+    // "published, no column list", so the check above stops running without saying so. A typo in
+    // the `publication` option would otherwise disable a boot check silently.
+    it('warns when the publication does not exist and a table is FULL, since the check cannot run', async () => {
+      await pool.query(`CREATE TABLE "${TABLE}" (id uuid PRIMARY KEY, secret text NOT NULL)`);
+      await pool.query(`ALTER TABLE "${TABLE}" REPLICA IDENTITY FULL`);
+
+      const staticSchema = schema([
+        model({
+          model: 'FullPlusList',
+          table: TABLE,
+          fields: [field('id', 'id', { isId: true }), field('secret', 'secret')],
+          primaryKey: ['id'],
+        }),
+      ]);
+
+      const warned = await captureWarnings(() =>
+        new PgCatalogSchemaProvider(staticSchema, pool, {
+          publication: 'pgbase_test_pub_absent',
+        }).resolve(),
+      );
+
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toMatch(/pgbase_test_pub_absent.*FullPlusList/s);
+    });
+
+    it('stays quiet about a missing publication when no table is FULL', async () => {
+      // A reads-only deployment has no publication by design. Warning it every boot would train
+      // people to ignore the warning that matters.
+      await pool.query(`CREATE TABLE "${TABLE}" (id uuid PRIMARY KEY, secret text NOT NULL)`);
+
+      const staticSchema = schema([
+        model({
+          model: 'FullPlusList',
+          table: TABLE,
+          fields: [field('id', 'id', { isId: true }), field('secret', 'secret')],
+          primaryKey: ['id'],
+        }),
+      ]);
+
+      const warned = await captureWarnings(() =>
+        new PgCatalogSchemaProvider(staticSchema, pool, {
+          publication: 'pgbase_test_pub_absent',
+        }).resolve(),
+      );
+
+      expect(warned).toEqual([]);
     });
 
     it('treats FOR ALL TABLES membership as unrestricted', async () => {

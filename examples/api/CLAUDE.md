@@ -1,6 +1,6 @@
 # CLAUDE.md — `examples/api/`
 
-The NestJS half of the Opsboard example. It is a reference *installation* of pgbase and, at the
+The NestJS half of the Opsboard example. It is a reference _installation_ of pgbase and, at the
 same time, **the fixture the package's own test suite runs against** — `src/nest/__tests__/`
 imports `src/generated/{prisma,pgbase}` from here, and `test/global-setup.ts` migrates this schema
 into `:55433`. Breaking this workspace breaks `pnpm test` at the repo root.
@@ -10,7 +10,11 @@ into `:55433`. Breaking this workspace breaks `pnpm test` at the repo root.
 `src/pgbase/` is the entire cost of adopting pgbase — copy the folder, adapt `policies.ts`, done.
 Every other folder is an ordinary Nest feature module that happens to inject `ScopedDb`.
 
-- `pgbase.module.ts` — pool, claims, policies, scoped client, WAL config in one `forRootAsync`.
+- `pgbase.module.ts` — connection, claims, policies, scoped client, WAL config in one
+  `forRootAsync`. It passes `connectionString`, not a `Pool`: pgbase then builds the catalog pool
+  and closes it on shutdown, which is why there is no `schema-pool.provider.ts` here any more.
+  `publication` sits at the top level, not inside `live` — one option feeds both the resolver and
+  the leader.
 - `policies.ts` — one RLS predicate per model. **This is the whole authorization surface**; no
   controller or service re-checks the caller. `pgbasePolicies` is exhaustive by `satisfies`, so a
   new model is a `tsc` error here before it is a runtime problem.
@@ -19,9 +23,12 @@ Every other folder is an ordinary Nest feature module that happens to inject `Sc
   `visibleUserIds` and the policy stays a plain `in`. Reach for this whenever a policy wants a join.
 - `caller.ts` — reads the ambient request context for `userId`/`orgId` in write paths.
 - `dev-principal.ts` — **the one file to replace before this is anything but a harness.** It reads
-  a user id from a header. It also demonstrates the required dual read: HTTP requests carry
-  `headers`, socket handshakes carry `auth`, because a browser cannot set headers on a WebSocket.
+  a user id via `req.credential(...)`, which covers both transports: HTTP requests carry `headers`,
+  socket handshakes carry `auth`, because a browser cannot set headers on a WebSocket. pgbase
+  normalizes that into `PgbaseRequest` so this stays one lookup.
 - `scoped-db.ts` — the `ScopedPrismaToken` subclass that makes `ScopedDb` injectable and typed.
+
+`ScopedRowNotFoundError` needs no filter here — pgbase maps it to 404 itself.
 
 Feature modules follow one shape: validated DTO → controller → service on `ScopedDb`. Services do
 business logic and nothing about identity. Controllers publish to no socket; the WAL does that.
@@ -45,12 +52,12 @@ Two deliberate configurations that look like mistakes:
 
 ## Hand-written migrations
 
-Three things Prisma will never generate and never notice are missing:
+Two things Prisma will never generate and never notice are missing:
 
-| migration | why it cannot be generated |
-| --- | --- |
-| `..._replica_identity_and_partial_indexes` | `REPLICA IDENTITY` has no Prisma syntax; neither does a partial (`WHERE`) unique index |
-| `..._pgbase_publication` | Prisma has no concept of a publication |
+| migration                                  | why it cannot be generated                                                                      |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `..._replica_identity_and_partial_indexes` | `REPLICA IDENTITY` has no Prisma syntax; neither does a partial (`WHERE`) unique index          |
+| `..._pgbase_publication`                   | Prisma has no concept of a publication                                                 |
 
 **Known consequence:** `prisma migrate dev` does not know about the partial unique index
 `jobs_one_running_per_org` and will report the database as drifted and offer to reset. That is the
