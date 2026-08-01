@@ -54,9 +54,9 @@ Two deliberate configurations that look like mistakes:
 
 Two things Prisma will never generate and never notice are missing:
 
-| migration                                  | why it cannot be generated                                                                      |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `..._replica_identity_and_partial_indexes` | `REPLICA IDENTITY` has no Prisma syntax; neither does a partial (`WHERE`) unique index          |
+| migration                                  | why it cannot be generated                                                             |
+| ------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `..._replica_identity_and_partial_indexes` | `REPLICA IDENTITY` has no Prisma syntax; neither does a partial (`WHERE`) unique index |
 | `..._pgbase_publication`                   | Prisma has no concept of a publication                                                 |
 
 **Known consequence:** `prisma migrate dev` does not know about the partial unique index

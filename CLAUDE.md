@@ -89,14 +89,12 @@ PolicyRegistry<Prisma.ModelName>`), so a forgotten model is a `tsc` error and mo
   gateway and `live-runtime`, and `scoped-prisma` (a typed Prisma facade whose delegates are
   restricted to scoped operations, with no bypass method by design).
 - **`client/`, `react/`** — the SDK, `useLiveQuery`, and the RTK Query binding.
-- **`generator/`** — the `pgbase` bin. With no arguments it is the Prisma generator (DMMF → a
-  static TS schema module in `index.ts`, plus client row types in `models.ts`); with a command it
-  is a setup helper (`pgbase publication`). Bare invocation _must_ stay generator mode: Prisma
-  spawns it with no args and speaks JSON-RPC over stdio, so anything written to stdout there
-  corrupts that channel. The schema module exists because logical decoding reports physical names
-  only, so the Prisma↔physical mapping must survive as runtime _data_; nothing Prisma generates
-  carries it. `SCHEMA_FORMAT_VERSION` lives in `src/version.ts` and must be bumped when the emitted
-  shape changes.
+- **`generator/`** — the `pgbase` bin: Prisma DMMF → a static TS schema module (`index.ts`) plus
+  client row types (`models.ts`). Prisma spawns it with no args and speaks JSON-RPC over stdio, so
+  it must never write to stdout. The schema module exists because logical decoding reports physical
+  names only, so the Prisma↔physical mapping must survive as runtime _data_; nothing Prisma
+  generates carries it. `SCHEMA_FORMAT_VERSION` lives in `src/version.ts` and must be bumped when
+  the emitted shape changes.
 
 ### Invariants that are easy to break
 

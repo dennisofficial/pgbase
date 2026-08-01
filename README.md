@@ -712,9 +712,8 @@ SELECT relname, relreplident FROM pg_class WHERE relname = 'jobs';  -- 'f' = FUL
 | `@dltech/pgbase/transport` | the change transport (Postgres `NOTIFY` / Redis fan-out) and its codec                  |
 | `@dltech/pgbase`           | _empty_ — the root entry exports nothing; import from a subpath                         |
 
-The package also ships the `pgbase` binary. With no arguments it is the Prisma generator that
-`provider = "pgbase"` resolves to — it emits `index.ts` (the runtime schema) and `models.ts` (the
-client row types). With a command it is a setup helper: `pgbase publication --help`.
+The package also ships the `pgbase` binary — the Prisma generator that `provider = "pgbase"`
+resolves to. It emits `index.ts` (the runtime schema) and `models.ts` (the client row types).
 
 `query` is dependency-light on purpose: the same `evaluate` runs on the server against WAL tuples,
 and is meant to run in the browser too, to fan one socket-level subscription out to many component
