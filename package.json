@@ -1,6 +1,6 @@
 {
   "name": "@dltech/pgbase",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hosted Postgres BaaS for NestJS + Prisma: RLS-guarded live queries over a typed client SDK (CQS)",
   "license": "MIT",
   "author": "Dennis Lysenko",
