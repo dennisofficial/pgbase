@@ -60,13 +60,8 @@ function bump(id: string, user: string): Promise<Response> {
 }
 
 beforeAll(async () => {
-  try {
-    process.loadEnvFile();
-  } catch {}
-  // A slot of its own, so this never fights a running dev server for the app's slot and silently
-  // falls back to standby — which is indistinguishable from "no deltas ever arrive".
-  process.env.PGBASE_SLOT ??= 'pgbase_e2e';
-
+  // `.env` and `PGBASE_SLOT` are handled by ConfigModule and vitest.config.ts respectively — both
+  // are read at import time, before this hook runs.
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   app = moduleRef.createNestApplication();
   // The same configuration main.ts applies, so this suite exercises the real one.

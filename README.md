@@ -3,9 +3,10 @@
 Self-hosted Postgres BaaS for NestJS + Prisma. Clients query the database directly — live or
 one-shot — through a typed SDK, inside a row-level-security envelope they cannot influence.
 
-> **Status: pre-alpha.** The schema registry, policy validation, claims, and **one-shot reads**
-> work — over HTTP and in-process. Live subscriptions, the client SDK, and the React bindings do
-> not exist yet; `@dltech/pgbase/client` and `/react` are empty stubs.
+> **Status: pre-alpha.** One-shot reads, live subscriptions, the typed client SDK, and the React
+> hook all work — the example app in [`examples/`](examples/README.md) runs on them end to end.
+> Not built yet: live re-run for joins and aggregates, and the root `@dltech/pgbase` entry, which
+> is empty — import from a subpath.
 
 ## The pattern is CQS
 
@@ -37,9 +38,28 @@ columns, while a read can do anything Prisma can.
 | **live**      | predicates over the model's own columns                                                    | none                |
 | _live re-run_ | joins and aggregates kept live, by re-running on an upstream change — **not built yet**    | explicit, per model |
 
-Reads work today. Live queries are in progress.
+The first two rows work today. Live re-run is the one that does not exist yet.
 
 ## Getting started
+
+Install the package, plus the peers for the halves you actually use — every peer is optional and
+declared as such, so nothing is pulled in for a side of the stack you aren't building:
+
+```bash
+pnpm add @dltech/pgbase
+```
+
+| you're building             | also install                                          |
+| --------------------------- | ----------------------------------------------------- |
+| the Nest server             | `@nestjs/common` `@nestjs/core` `@prisma/client` `pg` |
+| live subscriptions (server) | `socket.io`                                           |
+| a client (browser or node)  | `socket.io-client`                                    |
+| the React hook              | `react` 19+                                           |
+| the RTK Query binding       | `@reduxjs/toolkit` 2+                                 |
+
+Node 20+, Prisma 7, NestJS 11, PostgreSQL 15+. `pg` is a direct dependency of pgbase, but you
+construct the `Pool` yourself and hand it to the module, so depend on it explicitly rather than
+reaching through pgbase's copy.
 
 ### 1. Configure Postgres
 
@@ -195,18 +215,45 @@ PgbaseModule.forRootAsync({
   useFactory: (prisma: PrismaService, pool: Pool, claimsBuilder: OrgMembershipClaimsBuilder) => ({
     pool,
     prisma,
-    schema: pgbaseSchema, // the generated artifact from step 1
+    schema: pgbaseSchema, // the generated artifact from step 2
     policies: pgbasePolicies,
     claimsBuilder,
     getPrincipal, // pulls the authenticated principal off the request
+    // Omit `live` entirely and you get reads only: no replication connection, no socket server.
+    live: {
+      replicationConfig: { connectionString: process.env.DATABASE_URL },
+      slotName: 'pgbase_myapp',
+      publication: 'pgbase',
+      socketIoOptions: { cors: { origin: 'https://app.example.com' } },
+    },
   }),
-  scopedPrisma: ScopedDb, // see step 4
+  scopedPrisma: ScopedDb, // see step 5
 });
 ```
 
 `forRoot` is the same thing with a constant factory, for apps with nothing to inject.
-`scopedPrisma` and `routePrefix` sit outside the factory because they are read while the module
-definition is built — the DI token and the controller's route exist before any provider runs.
+`scopedPrisma`, `routePrefix`, and `schemaProvider` sit outside the factory because they are read
+while the module definition is built — the DI token and the controller's route exist before any
+provider runs.
+
+The rest of the options, all optional:
+
+| option               | what it does                                                               |
+| -------------------- | -------------------------------------------------------------------------- |
+| `live`               | turns on the WAL leader and the socket.io gateway; absent means reads only |
+| `publication`        | publication name used by boot-time schema resolution (default `pgbase`)    |
+| `routePrefix`        | the read controller's route (default `pgbase`, so `POST /pgbase/read`)     |
+| `limits`             | read result limits — max rows, max depth                                   |
+| `argsLimits`         | bounds on the incoming `args` tree, checked before anything walks it       |
+| `serializers`        | extra wire types beyond the built-ins                                      |
+| `decimalConstructor` | makes `numeric` deltas arrive as `Decimal` rather than a string            |
+| `claimsCacheOptions` | TTL and size of the per-principal claims cache                             |
+| `schemaProvider`     | replaces `pg_catalog` resolution, mostly for tests                         |
+
+The `live` block needs a database that has been prepared for it — a role with `REPLICATION`, and a
+publication you create in a migration. Both are covered under
+[Postgres requirements](#live-subscriptions--what-the-wal-leader-needs); the leader checks them at
+boot and fails with the exact DDL to run.
 
 Then enable Nest's shutdown hooks in `main.ts`:
 
@@ -234,7 +281,8 @@ never boot.
 
 Two entry points, one read path: in-process through an injected token, or over HTTP at
 `POST /{routePrefix}/read` (default `POST /pgbase/read`). Same policy filter, same limits, same
-result — they differ only in who is asking and how the row gets there.
+result — they differ only in who is asking and how the row gets there. The in-process token also
+carries the write side, since a command that touches the caller's own rows wants the same filter.
 
 **Server-side.** Declare the token once, then inject it like any other provider:
 
@@ -260,10 +308,10 @@ export class JobSummaryService {
 The claims come from the ambient request context, so a scoped read needs a request in flight — the
 context middleware resolves the principal via `getPrincipal` and caches its claims per request.
 
-**There is no escape hatch, by design.** `ScopedDb` does scoped reads and nothing else. Server-side
-work with no caller to scope to — crons, queue workers, migrations, backfills — injects your
-`PrismaClient` the ordinary way; it is not a lesser path, it is the correct one for code that has
-no principal. Wrapping it in a pgbase-branded bypass would buy a `reason` string and cost every
+**There is no escape hatch, by design.** `ScopedDb` does scoped work and nothing else — there is no
+bypass method on it and no way to drop the filter. Server-side work with no caller to scope to —
+crons, queue workers, migrations, backfills — injects your `PrismaClient` the ordinary way; it is
+not a lesser path, it is the correct one for code that has no principal. Wrapping it in a pgbase-branded bypass would buy a `reason` string and cost every
 such job a callback that can't cross a service boundary.
 
 Calling a scoped delegate outside a request throws rather than reading something arbitrary, and
@@ -277,47 +325,160 @@ or work that outlived the request that began it. Server-side work with no caller
 should use your PrismaClient directly.
 ```
 
-**Client-side.** The typed SDK doesn't exist yet, so today a client calls the endpoint directly.
-The body is `{ model, args }`, where `model` is the **Prisma model name** and `args` accepts
-`where`, `select`, `include`, `orderBy`, `take`, `skip`, `cursor`, and `distinct` — any other key
-is a 400 rather than a silently ignored field:
+The token is a class rather than a symbol so it carries your client and policy registry as
+generics — `db.job` is typed from your schema, models without a policy don't exist on it, and no
+`@Inject` is needed. A scoped delegate covers reads and single-row writes:
+
+| operations                                                                                               | scoping                                                                      |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `findMany` `findFirst` `findFirstOrThrow` `findUnique` `findUniqueOrThrow` `count` `aggregate` `groupBy` | the policy predicate is ANDed into `where`                                   |
+| `create`                                                                                                 | the new row is proven in scope before it is written                          |
+| `update` `delete`                                                                                        | the pre-image must be visible, and an update's post-image must stay in scope |
+
+`update` and `delete` run inside a transaction that reads the row under the policy filter first, so
+a row belonging to someone else raises `ScopedRowNotFoundError` — deliberately the same error as a
+row that doesn't exist, because distinguishing the two is itself a disclosure. Nested relation
+writes under `data` are rejected: a nested create writes a row the policy never saw.
+
+pgbase's own exception filter maps `ReadValidationError` to 400 and `ScopeViolationError` to 403;
+`ScopedRowNotFoundError` is left to you, since only your app knows whether it should surface as a
+404 or as something quieter. One `@Catch(ScopedRowNotFoundError)` filter is enough, and keeps every
+service free of `.catch(...)` plumbing.
+
+The bulk operations — `upsert`, `createMany`, `updateMany`, `deleteMany`, and the `*AndReturn`
+variants — are not scoped yet and throw an error naming why (a bulk update has no single post-image
+to prove stayed in scope). Use your `PrismaClient` directly for those and enforce scope at the call
+site.
+
+**Client-side.** The typed SDK does the same read over HTTP:
 
 ```ts
-import SuperJSON from 'superjson';
+// pgbase/client.ts — one client for the whole app
+import { createClient } from '@dltech/pgbase/client';
 
-const res = await fetch('/pgbase/read', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json', ...authHeaders },
-  body: JSON.stringify({
-    model: 'Job',
-    args: {
-      where: { priority: { gte: 1 } },
-      orderBy: { createdAt: 'desc' },
-      include: { tags: true },
-      take: 20,
-    },
-  }),
-});
-
-if (!res.ok) {
-  // { statusCode, error, message } — 400 ReadValidationError, 403 ScopeViolationError.
-  throw new Error((await res.json()).message);
+interface Models {
+  Job: Job;
+  Task: Task;
 }
 
-// The response is a superjson envelope, so bigint / Date / Decimal survive the trip.
-const jobs = SuperJSON.deserialize<Job[]>(await res.json());
+export const pgbase = createClient<Models>({
+  baseUrl: 'https://api.example.com',
+  getAuth: () => ({ authorization: `Bearer ${accessToken()}` }),
+});
 ```
+
+```ts
+const jobs = await pgbase.Job.findMany({
+  where: { priority: { gte: 1 } },
+  orderBy: { createdAt: 'desc' },
+  include: { tags: true },
+  take: 20,
+});
+
+const job = await pgbase.Job.findOne({ where: { id } }); // take: 1, or null
+```
+
+The keys of `Models` are **Prisma model names**, and their values are the row types you expect back
+— hand-written today, since nothing generates client-side row types yet. `getAuth` is called per
+request and per socket (re)connection rather than captured once, so a token that expires mid-session
+refreshes itself; creating the client opens nothing.
+
+Under the hood that is `POST /{routePrefix}/read` with a body of `{ model, args }`, where `args`
+accepts `where`, `select`, `include`, `orderBy`, `take`, `skip`, `cursor`, and `distinct` — any
+other key is a 400 rather than a silently ignored field. The endpoint answers a failure with
+`{ statusCode, error, message }` — 400 `ReadValidationError`, 403 `ScopeViolationError` — and the
+SDK raises it as a `PgbaseHttpError` carrying that status. The response is a superjson envelope, so
+`bigint` / `Date` / `Decimal` survive the trip and the client decodes them for you. The request
+body is plain JSON, so `args` can only carry JSON-representable values.
+
+`prefix` (default `pgbase`) has to match the server's `routePrefix`, and `createSocket` lets you
+hand in your own `io(...)` if your bundler needs socket.io-client constructed on your side. The
+socket connects lazily, on the first live query.
 
 Authentication is yours: pgbase calls the `getPrincipal(req)` you supplied and never looks at the
 request itself, so whatever your app already uses — cookie, bearer token, session — keeps working
-unchanged. The request body is parsed as plain JSON rather than superjson, so `args` can only carry
-JSON-representable values; only the response is superjson-encoded.
+unchanged. One catch worth knowing before step 6: a browser cannot set headers on a WebSocket
+handshake, so on a socket your `getAuth` values arrive in socket.io's `auth` payload instead.
+`getPrincipal` receives the HTTP request in one case and the socket handshake in the other, and has
+to read both:
 
-The token is a class rather than a symbol so it carries your client and policy registry as
-generics — `db.job` is typed from your schema, models without a policy don't exist on it, and no
-`@Inject` is needed. A scoped delegate currently exposes **`findMany` only** — `findFirst`,
-`count`, and aggregates aren't on it yet, so a read that needs one has to wait for the read path to
-grow them or be written against Prisma with the policy filter applied by hand.
+```ts
+function getPrincipal(req: unknown): Principal {
+  const { headers, auth } = req as {
+    headers?: Record<string, string>;
+    auth?: Record<string, string>;
+  };
+  const token = headers?.authorization ?? auth?.authorization;
+  // …verify and return your principal
+}
+```
+
+### 6. Subscribe
+
+A live query is a socket subscription: pgbase runs the read once for the initial snapshot, then
+keeps it correct from the WAL. There is no polling and no invalidation to write.
+
+```ts
+const stop = pgbase.Job.subscribeMany({
+  where: { status: 'RUNNING', labels: { has: 'urgent' } },
+  onUpdate: (jobs) => render(jobs),
+  onError: (err) => console.error(err),
+});
+```
+
+`subscribeOne` is the same with the first row or `null`. `createSubscription()` gives you the
+handle underneath — `query`, `getSnapshot`, `subscribe`, `close` — which is what the React binding
+is built on.
+
+**A live `where` is narrower than a read's.** It takes predicates over the model's own columns and
+nothing else — no relation filters, no `include`, no `orderBy`, `take`, or `skip`. That is the
+capability budget from the table above: a WAL event hands you one row, so anything requiring rows
+you weren't handed can't be decided. Columns a policy omits aren't filterable either; the RLS
+predicate itself is exempt, since the server authored it.
+
+Because there is no `take`, a subscription whose snapshot hits `limits.maxRows` is refused rather
+than truncated — a truncated snapshot and a full delta stream describe different sets, and the
+subscriber would never converge. Narrow the filter, or use a one-shot read.
+
+**React:**
+
+```tsx
+import { useLiveQuery } from '@dltech/pgbase/react';
+
+const jobs = useLiveQuery(pgbase.Job, { where: { status: 'RUNNING' } });
+```
+
+Changing the `where` closes the old subscription and opens a new one, so the list redraws from a
+fresh server snapshot rather than filtering a stale client-side copy.
+
+**RTK Query**, for the same subscriptions inside an existing Redux cache:
+
+```ts
+export const liveApi = createApi({
+  reducerPath: 'live',
+  baseQuery: fakeBaseQuery<string>(),
+  endpoints: (build) => ({
+    activity: build.query<readonly AuditLog[], void>(liveQueryEndpoint(pgbase.AuditLog)),
+  }),
+});
+```
+
+`liveQueryEndpoint` opens the subscription in `queryFn` and feeds the cache entry from deltas for
+as long as RTK holds it. Live rows keep their Prisma types — `bigint`, `Date`, `Decimal`,
+`Uint8Array` — which RTK's default `serializableCheck` rejects, so widen it to exactly those rather
+than switching it off:
+
+```ts
+getDefault({ serializableCheck: { isSerializable: isLiveSerializable } }).concat(
+  liveApi.middleware,
+);
+```
+
+**Connection state.** `pgbase.$status()` and `$onStatusChange` report
+`idle | connecting | connected | disconnected | error`. On reconnect every subscription rebuilds
+from a fresh server snapshot — there is no resumption by design, so a client never replays a gap it
+cannot prove it saw all of. `$setAuth` swaps the identity and reconnects, which resyncs every open
+subscription under the new claims instead of leaving rows the previous identity could see.
 
 ## Postgres requirements
 
@@ -345,8 +506,9 @@ Never give the publication a column list. Postgres accepts the DDL and then bloc
 and `DELETE` on any table that is also `REPLICA IDENTITY FULL`, so pgbase rejects the combination at
 boot rather than letting you discover it at write time.
 
-Boot fails with the exact statement to run if the publication is missing, so a forgotten migration
-is a startup error, never a silently dead subscription.
+With `live` configured, boot fails with the exact statement to run if the publication is missing, so
+a forgotten migration is a startup error, never a silently dead subscription. A reads-only
+deployment never opens a replication connection and doesn't need the publication at all.
 
 **PostgreSQL 15 or newer.** Boot-time schema resolution reads `pg_publication_rel.prattrs`, and
 that column arrived with publication column lists in PG 15. The dev image is 16.
@@ -354,24 +516,24 @@ that column arrived with publication column lists in PG 15. The dev image is 16.
 **Nothing else is a prerequisite.** No extensions — `citext` is detected and handled if a column
 uses it, never required. No superuser on the read path. And in particular **no native Postgres
 RLS**: a policy's `rls` predicate is compiled into the query and evaluated in-process, and
-`CREATE POLICY` is deliberately not used (§14.10 — logical decoding bypasses RLS entirely, so
-native policies would contribute nothing to the live path and would cost the routing keys the
-compiled predicate provides). Generating `CREATE POLICY` from the same registry as
+`CREATE POLICY` is deliberately not used — logical decoding bypasses RLS entirely, so native
+policies would contribute nothing to the live path and would cost the routing keys the compiled
+predicate provides. Generating `CREATE POLICY` from the same registry as
 defense-in-depth is a roadmap item, not a requirement.
 
 Every model needs a **primary key**. Boot fails on a table without one — a row with no identity
 can't be tracked across a WAL stream.
 
-### One-shot reads — implemented today
+### One-shot reads
 
 A `Pool` whose role can `SELECT` the application tables. Boot resolution reads `pg_class`,
 `pg_attribute`, `pg_constraint`, and `pg_publication_rel`, all world-readable. Nothing to enable,
 on any provider.
 
-### Live subscriptions — what the WAL leader will need
+### Live subscriptions — what the WAL leader needs
 
-Not wired into `PgbaseModule` yet; `@dltech/pgbase/wal` is the standalone piece. Configure the
-database ahead of it and the switch-on is a no-op. Four things beyond the settings in step 1.
+Everything here is checked when the leader starts, which happens only if you passed `live` to the
+module (step 4). Four things beyond the settings in step 1.
 
 **The role needs the `REPLICATION` attribute** — both to open the replication connection and to
 create the slot:
@@ -508,24 +670,44 @@ SELECT relname, relreplident FROM pg_class WHERE relname = 'jobs';  -- 'f' = FUL
 
 ## Subpath exports
 
-| Import                      | Contents                                                            |
-| --------------------------- | ------------------------------------------------------------------- |
-| `@dltech/pgbase/nest`    | `PgbaseModule`, `PgbaseReadService`, `ScopedPrismaToken`            |
-| `@dltech/pgbase/policy`  | `definePolicy`, `NO_CLIENT_ACCESS`, `PolicyRegistry`, validation    |
-| `@dltech/pgbase/context` | `ClaimsBuilder`, the claims cache, scoped-write assertions          |
-| `@dltech/pgbase/query`   | the query AST, `normalize`, `evaluate`, `compileSql`                |
-| `@dltech/pgbase/read`    | read scoping, result plans, the wire codec                          |
-| `@dltech/pgbase/schema`  | `PgCatalogSchemaProvider` and resolved-schema types                 |
-| `@dltech/pgbase/wal`     | `createWalLeader`, the pgoutput decoder, change/resync events       |
-| `@dltech/pgbase/live`    | the live subscription protocol shared by gateway and client        |
-| `@dltech/pgbase/transport` | the change transport (Postgres/Redis fan-out) and its codec      |
-| `@dltech/pgbase/client`  | _not implemented_ — framework-agnostic client                       |
-| `@dltech/pgbase/react`   | _not implemented_ — RTK Query bindings and hooks                    |
-| `@dltech/pgbase`         | _empty_ — the root entry exports nothing yet; import from a subpath |
+| Import                     | Contents                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------- |
+| `@dltech/pgbase/nest`      | `PgbaseModule`, `PgbaseReadService`, `ScopedPrismaToken`, the live gateway              |
+| `@dltech/pgbase/client`    | `createClient`, `liveQueryEndpoint`, `isLiveSerializable`, `PgbaseWireCodec`            |
+| `@dltech/pgbase/react`     | `useLiveQuery`                                                                          |
+| `@dltech/pgbase/policy`    | `definePolicy`, `NO_CLIENT_ACCESS`, `PolicyRegistry`, validation                        |
+| `@dltech/pgbase/context`   | `ClaimsBuilder`, the claims cache, scoped-write assertions                              |
+| `@dltech/pgbase/query`     | the query AST, `normalize`, `evaluate`, `compileSql`                                    |
+| `@dltech/pgbase/read`      | read scoping, result plans, the wire codec                                              |
+| `@dltech/pgbase/schema`    | `PgCatalogSchemaProvider` and resolved-schema types                                     |
+| `@dltech/pgbase/wal`       | `createWalLeader`, the pgoutput decoder, change/resync events                           |
+| `@dltech/pgbase/live`      | the live subscription protocol, registry, router, and sink shared by gateway and client |
+| `@dltech/pgbase/transport` | the change transport (Postgres `NOTIFY` / Redis fan-out) and its codec                  |
+| `@dltech/pgbase`           | _empty_ — the root entry exports nothing; import from a subpath                         |
 
-`query` is dependency-light on purpose: the same `evaluate` is meant to run on the server (against
-WAL tuples) and in the browser (to fan one socket-level subscription out to many component
-queries). Only the server half exists today.
+The package also ships the `pgbase` binary, which is what `provider = "pgbase"` in a generator
+block resolves to.
+
+`query` is dependency-light on purpose: the same `evaluate` runs on the server against WAL tuples,
+and is meant to run in the browser too, to fan one socket-level subscription out to many component
+queries. Only the server half is wired up today — a client currently opens one subscription per
+query.
+
+## The example app
+
+[`examples/`](examples/README.md) is a small run queue — a NestJS API and a Next.js front end —
+where every list on screen is a live subscription. It is the end-to-end reference for everything
+above: policies, claims, the scoped client, `useLiveQuery`, and the RTK Query binding.
+
+```bash
+pnpm example:up      # postgres with wal_level=logical
+pnpm example:seed    # migrate + seed two orgs
+pnpm example:api     # :3001
+pnpm example:web     # :3000
+```
+
+Open it in two windows to watch one window's writes land in the other, and switch the second
+window to a user in a different org to watch them not.
 
 ## Scripts
 
@@ -540,9 +722,9 @@ queries). Only the server half exists today.
 - `pnpm example:seed` — migrate and seed the example database
 - `pnpm example:api` / `example:web` — run the example NestJS API and Next.js front end
 
-The build depends on `@swc/core`: tsup only emits `design:paramtypes` when it can resolve it, and
-degrades to a warning otherwise, so `postbuild` fails the build rather than shipping a package
-whose providers can't be resolved by Nest.
+The build depends on `@swc/core`. tsup only honours `emitDecoratorMetadata` when it can resolve it,
+and degrades to a warning otherwise — without it the package ships providers Nest cannot resolve,
+since `design:paramtypes` is how constructor injection finds its types.
 
 ## Releasing
 
@@ -556,10 +738,13 @@ git commit -am "chore(release): v1.1.0"
 git push                                        # this is the release
 ```
 
-On push, `.github/workflows/publish.yml` compares `package.json`'s version against the git tags.
-If the version is already tagged it exits; otherwise it typechecks, runs the suite, packs a real
-tarball and validates it, publishes to npm with provenance, tags `v<version>`, and opens a GitHub
-release. `.github/workflows/ci.yml` runs typecheck and tests on every push to `main` independently.
+`.github/workflows/publish.yml` runs on every push to `main` and every PR against it, in two jobs.
+`verify` typechecks and runs the suite against the real compose services. `publish` runs only on a
+push to `main`, and only after `verify` passed on that same commit: it compares `package.json`'s
+version against the git tags, exits if that version is already tagged, and otherwise packs a real
+tarball, validates it, publishes to npm with provenance, tags `v<version>`, and opens a GitHub
+release. `.github/workflows/changeset-check.yml` is a separate gate that requires a changeset on
+`feat/*` PRs; committing straight to `main` is unaffected by it.
 
 The tarball is validated with [`publint`](https://publint.dev) and
 [`arethetypeswrong`](https://arethetypeswrong.github.io) before publishing, because the failures
@@ -582,15 +767,13 @@ Consumers opt in with `pnpm add @dltech/pgbase@next`. Nobody running a plain
 
 ### Publishing credentials
 
-The workflow authenticates with the `NPM_TOKEN` repository secret — a granular npm token with
-**read and write** on the `@dltech` scope and **no** organization access. Scope-level (rather than
-per-package) selection is what lets it publish packages under `@dltech` that do not exist yet.
+The workflow publishes via [trusted publishing](https://docs.npmjs.com/trusted-publishers): the
+`id-token: write` permission lets pnpm exchange a GitHub OIDC token for short-lived npm
+credentials, so there is no `NPM_TOKEN` secret to store, rotate, or leak.
 
-Once the package exists on npm, the token can be retired in favour of
-[trusted publishing](https://docs.npmjs.com/trusted-publishers): configure this repo and workflow
-as a trusted publisher in the package's npm settings, and delete the secret. The workflow already
-requests `id-token: write`, and pnpm exchanges that OIDC token for short-lived credentials — no
-long-lived secret to rotate or leak.
+That trust is configured in the package's npm settings against **this repository and the
+`publish.yml` filename**, so renaming the workflow file breaks publishing until npm is updated to
+match. The `name:` inside it is free to change.
 
 ## License
 

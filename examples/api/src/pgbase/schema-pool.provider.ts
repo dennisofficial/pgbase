@@ -1,6 +1,7 @@
 import { Inject, Injectable, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
+import type { EnvConfig } from '../config/env.config';
 
 export const SCHEMA_POOL = Symbol('SCHEMA_POOL');
 
@@ -18,13 +19,8 @@ export class SchemaPoolShutdown implements OnApplicationShutdown {
   providers: [
     {
       provide: SCHEMA_POOL,
-      useFactory: (config: ConfigService) => {
-        const connectionString = config.get<string>('DATABASE_URL');
-        if (!connectionString) {
-          throw new Error('DATABASE_URL is not set — see examples/api/.env.example.');
-        }
-        return new Pool({ connectionString });
-      },
+      useFactory: (config: ConfigService<EnvConfig, true>) =>
+        new Pool({ connectionString: config.get('DATABASE_URL', { infer: true }) }),
       inject: [ConfigService],
     },
     SchemaPoolShutdown,

@@ -1,7 +1,7 @@
 import { requireContext } from '@dltech/pgbase/context';
 import { AsyncLocalStorageContextStore } from '@dltech/pgbase/nest';
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import type { Claims, Principal } from '../pgbase/claims';
+import type { Claims, Principal } from './claims';
 
 @Injectable()
 export class Caller {

@@ -1,9 +1,8 @@
-import { ScopedRowNotFoundError } from '@dltech/pgbase/nest';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { ActivityService } from '../activity/activity.service';
 import type { TaskModel } from '../generated/prisma/models';
+import { Caller } from '../pgbase/caller';
 import { ScopedDb } from '../pgbase/scoped-db';
-import { ActivityService } from './activity.service';
-import { Caller } from './caller';
 
 @Injectable()
 export class TasksService {
@@ -23,23 +22,16 @@ export class TasksService {
     return task;
   }
 
+  // A task this caller cannot see raises ScopedRowNotFoundError; ScopedRowNotFoundFilter maps it
+  // to a 404, so neither method below has to distinguish "gone" from "not yours".
   async setDone(id: string, done: boolean): Promise<TaskModel> {
-    const task = await this.db.task.update({ where: { id }, data: { done } }).catch(notFound(id));
+    const task = await this.db.task.update({ where: { id }, data: { done } });
     await this.activity.record(`${done ? 'checked off' : 'reopened'} "${task.title}"`);
     return task;
   }
 
   async remove(id: string): Promise<void> {
-    const task = await this.db.task.delete({ where: { id } }).catch(notFound(id));
+    const task = await this.db.task.delete({ where: { id } });
     await this.activity.record(`removed checklist item "${task.title}"`);
   }
-}
-
-function notFound(id: string): (err: unknown) => never {
-  return (err) => {
-    if (err instanceof ScopedRowNotFoundError) {
-      throw new NotFoundException(`No task ${id} visible to this user.`);
-    }
-    throw err;
-  };
 }

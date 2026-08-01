@@ -1,15 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { Caller } from '../pgbase/caller';
 import { ScopedDb } from '../pgbase/scoped-db';
-import { Caller } from './caller';
 
 @Injectable()
 export class ActivityService {
   constructor(
-    private readonly scopedDB: ScopedDb,
+    private readonly db: ScopedDb,
     private readonly caller: Caller,
   ) {}
 
   async record(action: string): Promise<void> {
-    await this.scopedDB.auditLog.create({ data: { actorId: this.caller.userId, action } });
+    await this.db.auditLog.create({ data: { actorId: this.caller.userId, action } });
   }
 }

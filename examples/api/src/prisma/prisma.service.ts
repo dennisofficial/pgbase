@@ -1,18 +1,13 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
+import type { EnvConfig } from '../config/env.config';
 import { PrismaClient } from '../generated/prisma/client';
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
-  constructor(configService: ConfigService) {
-    const connectionString = configService.get<string>('DATABASE_URL');
-    if (!connectionString) {
-      throw new Error(
-        'DATABASE_URL is not set. Copy examples/api/.env.example to examples/api/.env ' +
-          '(and run `pnpm example:up` to start Postgres).',
-      );
-    }
+  constructor(config: ConfigService<EnvConfig, true>) {
+    const connectionString = config.get('DATABASE_URL', { infer: true });
     super({ adapter: new PrismaPg({ connectionString }) });
   }
 
